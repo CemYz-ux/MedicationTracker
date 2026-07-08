@@ -64,6 +64,14 @@ function renderMedicationItem(medication) {
   rowError.className = "form-error row-error";
   rowError.setAttribute("role", "alert");
 
+  // Tracks the last successfully saved interval for this row. `medication`
+  // is captured once at render time and never updated, so on an invalid
+  // edit we must fall back to this instead of `medication.intervalHours` —
+  // otherwise a row that was successfully edited once would revert to its
+  // original pre-edit value on a later invalid edit, even though the saved
+  // value is correct.
+  let lastSavedIntervalHours = medication.intervalHours;
+
   intervalRowInput.addEventListener("change", () => {
     try {
       medications = updateMedicationInterval(
@@ -74,10 +82,11 @@ function renderMedicationItem(medication) {
       saveMedications(medications, window.localStorage);
       rowError.textContent = "";
       const updated = medications.find((item) => item.id === medication.id);
-      intervalRowInput.value = updated.intervalHours;
+      lastSavedIntervalHours = updated.intervalHours;
+      intervalRowInput.value = lastSavedIntervalHours;
     } catch (error) {
       rowError.textContent = error.message;
-      intervalRowInput.value = medication.intervalHours;
+      intervalRowInput.value = lastSavedIntervalHours;
     }
   });
 

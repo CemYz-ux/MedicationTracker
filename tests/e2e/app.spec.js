@@ -187,3 +187,34 @@ test("editing a medication's interval to an invalid value shows an error and ret
 
   await expect(page.getByLabel("Interval (hours)").last()).toHaveValue("8");
 });
+
+test("after a successful interval edit, a later invalid edit retains the newly saved value (not the original)", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "+ Add medication" }).click();
+  await page.getByLabel("Name").fill("Aspirin");
+  await page.getByLabel("Dose").fill("100mg");
+  await page.getByLabel("Interval (hours)").fill("8");
+  await page.getByRole("button", { name: "Add medication", exact: true }).click();
+
+  const intervalInput = page.getByLabel("Interval (hours)").last();
+
+  // First edit: valid change from the original value, should save.
+  await intervalInput.fill("12");
+  await intervalInput.blur();
+  await expect(intervalInput).toHaveValue("12");
+
+  // Second edit: invalid, should be rejected and fall back to the last
+  // *saved* value (12), not the row's original pre-edit value (8).
+  await intervalInput.fill("-1");
+  await intervalInput.blur();
+
+  await expect(page.getByRole("alert").last()).toHaveText(
+    "Interval (hours) must be a positive number."
+  );
+  await expect(intervalInput).toHaveValue("12");
+
+  await page.reload();
+
+  await expect(page.getByLabel("Interval (hours)").last()).toHaveValue("12");
+});
