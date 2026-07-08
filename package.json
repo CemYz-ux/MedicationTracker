@@ -1,0 +1,29 @@
+{
+  "name": "medicationtracker",
+  "version": "1.0.0",
+  "description": "A very simple static medication tracker webpage, hosted on GitHub Pages.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "serve . -l 5500",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CemYz-ux/MedicationTracker.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/CemYz-ux/MedicationTracker/issues"
+  },
+  "homepage": "https://github.com/CemYz-ux/MedicationTracker#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "serve": "^14.2.6",
+    "vitest": "^4.1.10"
+  }
+}

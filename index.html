@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Medication Tracker</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Medication Tracker</h1>
+    <p>Keep track of the medications you take, their dose, and when to take them.</p>
+  </header>
+
+  <main>
+    <section aria-labelledby="add-medication-heading">
+      <h2 id="add-medication-heading">Add a medication</h2>
+      <form id="medication-form" novalidate>
+        <div class="form-row">
+          <label for="med-name">Name</label>
+          <input id="med-name" name="name" type="text" autocomplete="off" required />
+        </div>
+        <div class="form-row">
+          <label for="med-dose">Dose</label>
+          <input id="med-dose" name="dose" type="text" autocomplete="off" placeholder="e.g. 500mg" required />
+        </div>
+        <div class="form-row">
+          <label for="med-time">Time</label>
+          <input id="med-time" name="time" type="time" required />
+        </div>
+        <p id="form-error" class="form-error" role="alert"></p>
+        <button type="submit">Add medication</button>
+      </form>
+    </section>
+
+    <section aria-labelledby="medication-list-heading">
+      <h2 id="medication-list-heading">Your medications</h2>
+      <p id="empty-state">No medications logged yet.</p>
+      <ul id="medication-list" class="medication-list" hidden></ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>Data is stored only in your browser. Nothing is sent to a server.</p>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
