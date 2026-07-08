@@ -1,6 +1,6 @@
 # MedicationTracker
 
-A very simple static webpage for logging medications (name, dose, time), hosted on GitHub Pages. No backend — all data is stored in your browser via `localStorage`.
+A very simple static webpage for logging medications (name, dose, and dosing interval in hours), hosted on GitHub Pages. No backend — all data is stored in your browser via `localStorage`. Medications are added via a "+ Add medication" modal, and each medication's interval can be edited inline at any time.
 
 ## Stack
 

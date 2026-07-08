@@ -9,13 +9,24 @@
 <body>
   <header>
     <h1>Medication Tracker</h1>
-    <p>Keep track of the medications you take, their dose, and when to take them.</p>
+    <p>Keep track of the medications you take, their dose, and how often to take them.</p>
   </header>
 
+  <div class="add-medication-bar">
+    <button id="add-medication-trigger" type="button" class="add-medication-trigger">
+      + Add medication
+    </button>
+  </div>
+
   <main>
-    <section aria-labelledby="add-medication-heading">
-      <h2 id="add-medication-heading">Add a medication</h2>
-      <form id="medication-form" novalidate>
+    <dialog id="add-medication-dialog" aria-labelledby="add-medication-dialog-title">
+      <form id="add-medication-form" novalidate>
+        <div class="dialog-header">
+          <h2 id="add-medication-dialog-title">Add medication</h2>
+          <button type="button" id="close-dialog-btn" class="close-dialog-btn" aria-label="Close">
+            &times;
+          </button>
+        </div>
         <div class="form-row">
           <label for="med-name">Name</label>
           <input id="med-name" name="name" type="text" autocomplete="off" required />
@@ -25,13 +36,16 @@
           <input id="med-dose" name="dose" type="text" autocomplete="off" placeholder="e.g. 500mg" required />
         </div>
         <div class="form-row">
-          <label for="med-time">Time</label>
-          <input id="med-time" name="time" type="time" required />
+          <label for="med-interval">Interval (hours)</label>
+          <input id="med-interval" name="intervalHours" type="number" step="any" inputmode="decimal" required />
         </div>
         <p id="form-error" class="form-error" role="alert"></p>
-        <button type="submit">Add medication</button>
+        <div class="dialog-actions">
+          <button type="button" id="cancel-add-btn">Cancel</button>
+          <button type="submit">Add medication</button>
+        </div>
       </form>
-    </section>
+    </dialog>
 
     <section aria-labelledby="medication-list-heading">
       <h2 id="medication-list-heading">Your medications</h2>
