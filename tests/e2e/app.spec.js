@@ -534,3 +534,76 @@ test("editing the interval mid-cooldown does not disturb the running countdown/f
   await expect(page.getByText("5h of 8h remaining")).toBeVisible();
   await expect(page.getByRole("button", { name: "GO — log Aspirin taken" })).toBeDisabled();
 });
+
+// --- MED-10: cooldown/active state stays correct across reload/reopen -----
+
+test("mid-cooldown reload recomputes remaining time from the stored timestamp instead of resetting it (MED-10 AC1)", async ({
+  page,
+}) => {
+  // Fake clock so the elapsed-then-reload sequence is deterministic instead
+  // of racing real wall-clock time.
+  await page.clock.install();
+  await page.reload();
+
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/cooldown/);
+  await expect(item).toHaveCSS("--progress", "100%");
+
+  // 2 of the 8 hours elapse before the reload — a fresh reset would show
+  // 8h/100%, so asserting ~6h/75% after reload proves the remaining time was
+  // recomputed from the stored `lastTakenAt`, not restarted.
+  await page.clock.fastForward(2 * 60 * 60 * 1000);
+  await page.reload();
+
+  const itemAfterReload = page.locator(".medication-item");
+  await expect(itemAfterReload).toHaveClass(/cooldown/);
+  // Numeric tolerance, not an exact "75%" string match: navigation across
+  // the reload can leak a few milliseconds of real time before the fake
+  // clock re-attaches to the new page, so the recomputed fraction lands
+  // fractionally under 75% (e.g. 74.9999%) rather than exactly on it.
+  const progressPercent = await itemAfterReload.evaluate((el) =>
+    parseFloat(getComputedStyle(el).getPropertyValue("--progress"))
+  );
+  expect(progressPercent).toBeCloseTo(75, 1);
+  await expect(page.getByText("6h of 8h remaining")).toBeVisible();
+  await expect(page.getByRole("button", { name: "GO — log Aspirin taken" })).toBeDisabled();
+});
+
+test("a medication whose cooldown fully elapsed while the tab was closed shows Active on the very first render after reopening, with no in-tab timer required (MED-10 AC2)", async ({
+  page,
+}) => {
+  // Seed localStorage directly with a medication whose stored lastTakenAt +
+  // cooldownIntervalHours already fully elapsed, simulating "closed the
+  // browser, came back hours later" rather than a tab that stayed open and
+  // ticked down in real time.
+  const lastTakenAt = new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString();
+  await page.evaluate((takenAtIso) => {
+    window.localStorage.setItem(
+      "medications",
+      JSON.stringify([
+        {
+          id: "1",
+          name: "Aspirin",
+          dose: "100mg",
+          intervalHours: 8,
+          cooldownIntervalHours: 8,
+          lastTakenAt: takenAtIso,
+        },
+      ])
+    );
+  }, lastTakenAt);
+
+  // A reload re-runs the app's module from scratch, so the very first
+  // render is the only thing that can be responsible for the Active
+  // state below — no periodic tick has had a chance to run yet.
+  await page.reload();
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/active/);
+  await expect(item).not.toHaveClass(/cooldown/);
+  await expect(page.getByRole("button", { name: "GO — log Aspirin taken" })).toBeEnabled();
+  await expect(item.locator(".cooldown-countdown")).toBeHidden();
+});
