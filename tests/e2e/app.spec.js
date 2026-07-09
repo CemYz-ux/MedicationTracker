@@ -34,6 +34,38 @@ test("shows the empty state, not an error or blank page, when localStorage data 
   expect(consoleErrors).toEqual([]);
 });
 
+test("shows a medication as Active on load when its cooldown had already elapsed before the page loaded (MED-9 AC1)", async ({
+  page,
+}) => {
+  // Seed a medication whose 8h cooldown finished 2h ago, directly into
+  // localStorage — mirrors a tab that was closed mid-cooldown and reopened
+  // after the interval elapsed, so this exercises the initial-render path
+  // rather than the periodic re-check covered by the MED-8 fast-forward test.
+  const lastTakenAt = new Date(Date.now() - 10 * 60 * 60 * 1000).toISOString();
+  await page.evaluate((lastTakenAt) => {
+    window.localStorage.setItem(
+      "medications",
+      JSON.stringify([
+        {
+          id: "1",
+          name: "Aspirin",
+          dose: "100mg",
+          intervalHours: 8,
+          cooldownIntervalHours: 8,
+          lastTakenAt,
+        },
+      ])
+    );
+  }, lastTakenAt);
+  await page.reload();
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/active/);
+  await expect(item).not.toHaveClass(/cooldown/);
+  await expect(page.getByRole("button", { name: "GO — log Aspirin taken" })).toBeEnabled();
+  await expect(item.locator(".cooldown-countdown")).toBeHidden();
+});
+
 test("opens the add-medication modal from the trigger", async ({ page }) => {
   const dialog = page.locator("#add-medication-dialog");
   await expect(dialog).not.toBeVisible();
