@@ -45,13 +45,37 @@ function setGoButtonDisabled(goButton, isDisabled) {
   goButton.setAttribute("aria-disabled", String(isDisabled));
 }
 
+// Reflects the same `Boolean(lastTakenAt)` derivation the GO button's
+// disabled state already uses (MED-7 scope) as a status pill — "Active"
+// when GO is pressable, "Cooldown" when it isn't. No new logic, just a
+// visual label for state that already exists.
+function setCardStatus(item, pill, isDisabled) {
+  item.classList.toggle("active", !isDisabled);
+  item.classList.toggle("cooldown", isDisabled);
+  pill.classList.toggle("go", !isDisabled);
+  pill.classList.toggle("wait", isDisabled);
+  pill.textContent = isDisabled ? "Cooldown" : "Active";
+}
+
 function renderMedicationItem(medication) {
   const item = document.createElement("li");
   item.className = "medication-item";
 
-  const info = document.createElement("span");
-  info.className = "medication-info";
-  info.textContent = `${medication.name} — ${medication.dose}`;
+  const header = document.createElement("div");
+  header.className = "medication-header";
+
+  const nameEl = document.createElement("span");
+  nameEl.className = "medication-name";
+  nameEl.textContent = medication.name;
+
+  const doseEl = document.createElement("span");
+  doseEl.className = "medication-dose";
+  doseEl.textContent = medication.dose;
+
+  header.append(nameEl, " — ", doseEl);
+
+  const pill = document.createElement("span");
+  pill.className = "pill";
 
   const intervalFieldId = `interval-${medication.id}`;
 
@@ -122,6 +146,7 @@ function renderMedicationItem(medication) {
   // aria-disabled keeps the button focusable — the click handler below
   // no-ops instead — so focus simply stays where the user left it.
   setGoButtonDisabled(goButton, Boolean(medication.lastTakenAt));
+  setCardStatus(item, pill, Boolean(medication.lastTakenAt));
 
   const goError = document.createElement("p");
   goError.className = "form-error row-error go-error";
@@ -141,6 +166,7 @@ function renderMedicationItem(medication) {
       medications = updated;
       goError.textContent = "";
       setGoButtonDisabled(goButton, true);
+      setCardStatus(item, pill, true);
       // Don't rely on aria-disabled's implicit "focus stays put" behavior —
       // it's a browser/Chromium-version-dependent quirk, not a guarantee.
       // Explicitly reassert focus here so it deterministically stays on
@@ -152,7 +178,7 @@ function renderMedicationItem(medication) {
     }
   });
 
-  item.append(info, intervalField, goButton, rowError, goError);
+  item.append(header, pill, intervalField, rowError, goButton, goError);
   return item;
 }
 

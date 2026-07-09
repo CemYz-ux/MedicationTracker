@@ -18,9 +18,10 @@ Living source of truth for what the site does. Update this file with every featu
 **Status:** Implemented
 **Flow:**
 1. On page load, previously logged medications are read from `localStorage` and rendered in a list.
-2. Each row shows the medication's name, dose, an editable Interval (hours) input, and a GO button (see "Log a dose (press GO)" below) — no cooldown countdown or delete control yet; those belong to later stories.
-3. If there are no medications (including corrupted/missing stored data), an empty-state message ("No medications logged yet.") is shown instead of the list.
-4. Records left over from the old prototype schema (`{id, name, dose, time}`, no `intervalHours`) are silently discarded on load rather than shown or migrated.
+2. Each row shows the medication's name, dose, an editable Interval (hours) input, a status pill, and a GO button (see "Log a dose (press GO)" below) — no cooldown countdown or delete control yet; those belong to later stories.
+3. The status pill is a green "Active" pill when GO is enabled, or an amber "Cooldown" pill when GO is disabled. It is a visual label only, derived from the same `Boolean(lastTakenAt)` check the GO button already uses — no new logic.
+4. If there are no medications (including corrupted/missing stored data), an empty-state message ("No medications yet — add one to get started.") is shown instead of the list.
+5. Records left over from the old prototype schema (`{id, name, dose, time}`, no `intervalHours`) are silently discarded on load rather than shown or migrated.
 
 ## Log a dose (press GO)
 **Status:** Implemented
