@@ -228,7 +228,7 @@ function renderMedicationItem(medication) {
     // checks) still can't log a new dose while genuinely in cooldown, even
     // if the attribute were ever stale — the rule lives in logic, not just
     // in the disabled styling/attribute.
-    const current = medications.find((item) => item.id === medication.id);
+    const current = medications.find((entry) => entry.id === medication.id);
     if (
       goButton.getAttribute("aria-disabled") === "true" ||
       (current && isInCooldown(current))
@@ -244,7 +244,7 @@ function renderMedicationItem(medication) {
       saveMedications(updated, window.localStorage);
       medications = updated;
       goError.textContent = "";
-      const justLogged = medications.find((item) => item.id === medication.id);
+      const justLogged = medications.find((entry) => entry.id === medication.id);
       // Refresh immediately rather than waiting for the next periodic tick,
       // so the card's fill starts at 100% and the countdown appears at the
       // same moment GO is pressed, not up to 30s later.
