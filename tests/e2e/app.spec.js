@@ -132,6 +132,12 @@ test("closing via a backdrop click discards unsaved input and returns focus to t
   await expect(trigger).toBeFocused();
 });
 
+test("focuses the Name field, not the close button, when the modal opens", async ({ page }) => {
+  await page.getByRole("button", { name: "+ Add medication" }).click();
+
+  await expect(page.getByLabel("Name")).toBeFocused();
+});
+
 test("focus stays trapped inside the modal while open", async ({ page }) => {
   await page.getByRole("button", { name: "+ Add medication" }).click();
 
