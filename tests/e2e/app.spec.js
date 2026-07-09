@@ -6,8 +6,32 @@ test.beforeEach(async ({ page }) => {
   await page.reload();
 });
 
-test("shows an empty state when no medications are logged", async ({ page }) => {
-  await expect(page.getByText("No medications logged yet.")).toBeVisible();
+test("shows an empty state when no medications are logged (first run, no localStorage data)", async ({
+  page,
+}) => {
+  await expect(
+    page.getByText("No medications yet — add one to get started.")
+  ).toBeVisible();
+  await expect(page.locator("#medication-list")).toBeHidden();
+});
+
+test("shows the empty state, not an error or blank page, when localStorage data is corrupted", async ({
+  page,
+}) => {
+  const consoleErrors = [];
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
+  page.on("console", (msg) => {
+    if (msg.type() === "error") consoleErrors.push(msg.text());
+  });
+
+  await page.evaluate(() => window.localStorage.setItem("medications", "not valid json"));
+  await page.reload();
+
+  await expect(
+    page.getByText("No medications yet — add one to get started.")
+  ).toBeVisible();
+  await expect(page.locator("#medication-list")).toBeHidden();
+  expect(consoleErrors).toEqual([]);
 });
 
 test("opens the add-medication modal from the trigger", async ({ page }) => {
@@ -31,7 +55,7 @@ test("adds a valid medication and shows it in the list", async ({ page }) => {
 
   await expect(page.locator("#add-medication-dialog")).not.toBeVisible();
   await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
-  await expect(page.getByText("No medications logged yet.")).toBeHidden();
+  await expect(page.getByText("No medications yet — add one to get started.")).toBeHidden();
 });
 
 test("shows a validation error and keeps the modal open when fields are empty", async ({
@@ -43,7 +67,7 @@ test("shows a validation error and keeps the modal open when fields are empty", 
   const dialog = page.locator("#add-medication-dialog");
   await expect(dialog).toBeVisible();
   await expect(page.getByRole("alert")).not.toBeEmpty();
-  await expect(page.getByText("No medications logged yet.")).toBeVisible();
+  await expect(page.getByText("No medications yet — add one to get started.")).toBeVisible();
 });
 
 test("shows a validation error for a non-numeric or non-positive interval", async ({ page }) => {
@@ -58,7 +82,7 @@ test("shows a validation error for a non-numeric or non-positive interval", asyn
   await expect(page.getByRole("alert")).toHaveText(
     "Interval (hours) must be a positive number."
   );
-  await expect(page.getByText("No medications logged yet.")).toBeVisible();
+  await expect(page.getByText("No medications yet — add one to get started.")).toBeVisible();
 });
 
 test("persists an added medication across a reload", async ({ page }) => {
@@ -83,7 +107,7 @@ test("closing via Cancel discards unsaved input and returns focus to the trigger
   await page.getByRole("button", { name: "Cancel" }).click();
 
   await expect(page.locator("#add-medication-dialog")).not.toBeVisible();
-  await expect(page.getByText("No medications logged yet.")).toBeVisible();
+  await expect(page.getByText("No medications yet — add one to get started.")).toBeVisible();
   await expect(trigger).toBeFocused();
 });
 
@@ -97,7 +121,7 @@ test("closing via the close control discards unsaved input and returns focus to 
   await page.getByRole("button", { name: "Close" }).click();
 
   await expect(page.locator("#add-medication-dialog")).not.toBeVisible();
-  await expect(page.getByText("No medications logged yet.")).toBeVisible();
+  await expect(page.getByText("No medications yet — add one to get started.")).toBeVisible();
   await expect(trigger).toBeFocused();
 });
 
@@ -111,7 +135,7 @@ test("closing via Escape discards unsaved input and returns focus to the trigger
   await page.keyboard.press("Escape");
 
   await expect(page.locator("#add-medication-dialog")).not.toBeVisible();
-  await expect(page.getByText("No medications logged yet.")).toBeVisible();
+  await expect(page.getByText("No medications yet — add one to get started.")).toBeVisible();
   await expect(trigger).toBeFocused();
 });
 
@@ -128,7 +152,7 @@ test("closing via a backdrop click discards unsaved input and returns focus to t
   await page.mouse.click(box.x + 2, box.y + 2);
 
   await expect(dialog).not.toBeVisible();
-  await expect(page.getByText("No medications logged yet.")).toBeVisible();
+  await expect(page.getByText("No medications yet — add one to get started.")).toBeVisible();
   await expect(trigger).toBeFocused();
 });
 
