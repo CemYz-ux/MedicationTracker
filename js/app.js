@@ -4,7 +4,17 @@ import {
   addMedication,
   updateMedicationInterval,
   logDose,
+  isInCooldown,
+  getCooldownProgress,
+  formatCountdown,
 } from "./medications.js";
+
+// How often the periodic re-check re-evaluates every medication's cooldown
+// state (countdown text, fill, GO enablement). The AC requires the
+// countdown text to refresh at least once a minute and reactivation to
+// happen within roughly 30-60s of the actual elapse moment; a 30s cadence
+// comfortably satisfies both without excessive DOM churn for a small list.
+const COOLDOWN_TICK_MS = 30_000;
 
 const trigger = document.getElementById("add-medication-trigger");
 const dialog = document.getElementById("add-medication-dialog");
@@ -21,8 +31,17 @@ const statusAnnouncer = document.getElementById("status-announcer");
 
 let medications = loadMedications(window.localStorage);
 
+// Per-medication references to the DOM nodes the periodic re-check needs to
+// touch (pill, GO button, countdown text, the card itself for its fill).
+// Populated on every full `render()` and read by `runCooldownTick()`, kept
+// separate from `medications` itself so the tick never has to rebuild the
+// list — that would blow away in-progress input (e.g. an interval edit) or
+// keyboard focus elsewhere on the page every 30 seconds.
+const cooldownRefs = new Map();
+
 function render() {
   list.innerHTML = "";
+  cooldownRefs.clear();
 
   if (medications.length === 0) {
     emptyState.hidden = false;
@@ -45,17 +64,57 @@ function setGoButtonDisabled(goButton, isDisabled) {
   goButton.setAttribute("aria-disabled", String(isDisabled));
 }
 
-// Reflects the same `Boolean(lastTakenAt)` derivation the GO button's
-// disabled state already uses (MED-7 scope) as a status pill — "Active"
-// when GO is pressable, "Cooldown" when it isn't. No new logic, just a
-// visual label for state that already exists.
-function setCardStatus(item, pill, isDisabled) {
-  item.classList.toggle("active", !isDisabled);
-  item.classList.toggle("cooldown", isDisabled);
-  pill.classList.toggle("go", !isDisabled);
-  pill.classList.toggle("wait", isDisabled);
-  pill.textContent = isDisabled ? "Cooldown" : "Active";
+// Reflects cooldown state as a status pill — "Active" when GO is pressable,
+// "Cooldown" when it isn't.
+function setCardStatus(item, pill, inCooldown) {
+  item.classList.toggle("active", !inCooldown);
+  item.classList.toggle("cooldown", inCooldown);
+  pill.classList.toggle("go", !inCooldown);
+  pill.classList.toggle("wait", inCooldown);
+  pill.textContent = inCooldown ? "Cooldown" : "Active";
 }
+
+// Re-derives and applies everything cooldown-related for one medication:
+// GO's functional disabled state, the status pill, the countdown text, and
+// the card's proportional fill (`--progress`). Called immediately after GO
+// is pressed (so the card reflects 100% fill + countdown right away) and
+// from the periodic tick (so it stays current without a reload). Never
+// touches any other medication's row, keeping refresh cycles independent.
+function updateCooldownDisplay(medication, refs, now = Date.now()) {
+  const { item, pill, goButton, countdownEl } = refs;
+  const inCooldown = isInCooldown(medication, now);
+
+  setGoButtonDisabled(goButton, inCooldown);
+  setCardStatus(item, pill, inCooldown);
+
+  if (inCooldown) {
+    countdownEl.textContent = formatCountdown(medication, now);
+    countdownEl.hidden = false;
+    const progressPercent = getCooldownProgress(medication, now) * 100;
+    item.style.setProperty("--progress", `${progressPercent}%`);
+  } else {
+    countdownEl.textContent = "";
+    countdownEl.hidden = true;
+    // Active cards show no fill at all — don't leave a stray inline
+    // `--progress` value sitting on the element once cooldown ends.
+    item.style.removeProperty("--progress");
+  }
+}
+
+// Periodic re-check: re-evaluates every medication's cooldown status so the
+// countdown/fill stay live and a medication automatically flips back to
+// Active once its interval elapses, with no reload or user action.
+function runCooldownTick() {
+  const now = Date.now();
+  for (const medication of medications) {
+    const refs = cooldownRefs.get(medication.id);
+    if (refs) {
+      updateCooldownDisplay(medication, refs, now);
+    }
+  }
+}
+
+setInterval(runCooldownTick, COOLDOWN_TICK_MS);
 
 function renderMedicationItem(medication) {
   const item = document.createElement("li");
@@ -125,11 +184,11 @@ function renderMedicationItem(medication) {
 
   intervalField.append(intervalLabel, intervalRowInput);
 
-  // MED-7 scope only: pressing GO records `lastTakenAt` and disables this
-  // button so it can't be pressed again. It intentionally does not compute
-  // or display a countdown/remaining-time (MED-8) and does not re-enable
-  // once an interval elapses (MED-9) — "has lastTakenAt been set" is the
-  // entire disabled-state rule for this story.
+  // Pressing GO records `lastTakenAt` (and snapshots the interval that was
+  // active at that moment — see `logDose`), which starts a live countdown
+  // shown via the pill, `countdownEl`, and the card's `--progress` fill,
+  // and disables this button until the interval elapses (MED-8) or is
+  // reactivated by a later story.
   const goButton = document.createElement("button");
   goButton.type = "button";
   goButton.className = "go-btn";
@@ -145,15 +204,35 @@ function renderMedicationItem(medication) {
   // "+ Add medication" trigger), with no announcement to screen readers.
   // aria-disabled keeps the button focusable — the click handler below
   // no-ops instead — so focus simply stays where the user left it.
-  setGoButtonDisabled(goButton, Boolean(medication.lastTakenAt));
-  setCardStatus(item, pill, Boolean(medication.lastTakenAt));
 
   const goError = document.createElement("p");
   goError.className = "form-error row-error go-error";
   goError.setAttribute("role", "alert");
 
+  // Live countdown text, e.g. "3h 12m of 5h remaining" — supplementary to
+  // the card's fill, never a substitute for it. Hidden entirely outside of
+  // cooldown (see `updateCooldownDisplay`).
+  const countdownEl = document.createElement("p");
+  countdownEl.className = "cooldown-countdown";
+  countdownEl.hidden = true;
+
+  const refs = { item, pill, goButton, countdownEl };
+  cooldownRefs.set(medication.id, refs);
+  updateCooldownDisplay(medication, refs);
+
   goButton.addEventListener("click", () => {
-    if (goButton.getAttribute("aria-disabled") === "true") {
+    // Two independent guards, deliberately not just one: `aria-disabled` is
+    // the fast, already-rendered check, but the cooldown itself is
+    // re-derived from `medications` right here too. That way a forced click
+    // (e.g. `dispatchEvent` bypassing Playwright/browser actionability
+    // checks) still can't log a new dose while genuinely in cooldown, even
+    // if the attribute were ever stale — the rule lives in logic, not just
+    // in the disabled styling/attribute.
+    const current = medications.find((item) => item.id === medication.id);
+    if (
+      goButton.getAttribute("aria-disabled") === "true" ||
+      (current && isInCooldown(current))
+    ) {
       return;
     }
 
@@ -165,8 +244,11 @@ function renderMedicationItem(medication) {
       saveMedications(updated, window.localStorage);
       medications = updated;
       goError.textContent = "";
-      setGoButtonDisabled(goButton, true);
-      setCardStatus(item, pill, true);
+      const justLogged = medications.find((item) => item.id === medication.id);
+      // Refresh immediately rather than waiting for the next periodic tick,
+      // so the card's fill starts at 100% and the countdown appears at the
+      // same moment GO is pressed, not up to 30s later.
+      updateCooldownDisplay(justLogged, refs);
       // Don't rely on aria-disabled's implicit "focus stays put" behavior —
       // it's a browser/Chromium-version-dependent quirk, not a guarantee.
       // Explicitly reassert focus here so it deterministically stays on
@@ -178,7 +260,7 @@ function renderMedicationItem(medication) {
     }
   });
 
-  item.append(header, pill, intervalField, rowError, goButton, goError);
+  item.append(header, pill, countdownEl, intervalField, rowError, goButton, goError);
   return item;
 }
 
