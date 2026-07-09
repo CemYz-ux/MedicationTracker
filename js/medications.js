@@ -163,10 +163,17 @@ function cooldownReadyAt(medication) {
  * `now < lastTakenAt + cooldownIntervalHours`. A medication that has never
  * been logged (`lastTakenAt` is `null`) is never in cooldown. `now` (epoch
  * millis) is injectable for deterministic tests; it defaults to `Date.now()`.
+ *
+ * A truthy but unparseable `lastTakenAt` (corrupted storage) makes
+ * `cooldownReadyAt` come back `NaN`; that's treated as not-in-cooldown too,
+ * via an explicit guard rather than relying on `now < NaN` evaluating to
+ * `false` (MED-10 AC4) — the outcome is unchanged, but it's now deliberate.
  */
 export function isInCooldown(medication, now = Date.now()) {
   if (!medication.lastTakenAt) return false;
-  return now < cooldownReadyAt(medication);
+  const readyAt = cooldownReadyAt(medication);
+  if (Number.isNaN(readyAt)) return false;
+  return now < readyAt;
 }
 
 /**
