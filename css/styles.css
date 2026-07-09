@@ -1,9 +1,31 @@
+@property --progress {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 100%;
+}
+
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
+
+  /* Color system — see MedicationTracker Design Note (MED-13). */
+  --paper: #EAEEEE;
+  --panel: #DEE4E3;
+  --ink: #17222A;
+  --ink-soft: #4C5A62;
+  --rule: #C1CBCA;
+  --go: #2E6E52;
+  --go-soft: #DBEAE1;
+  --go-line: #A9CCBB;
+  --wait: #A6631F;
+  --wait-soft: #F0E1CC;
+  --wait-line: #DCB77E;
+  --danger: #B3261E;
+
+  --font-serif: Charter, "Iowan Old Style", "Palatino Linotype", Georgia, "Noto Serif", serif;
+  --font-sans: ui-sans-serif, "Helvetica Neue", Arial, sans-serif;
+
   --gap: 1rem;
-  --border: #ccc;
-  --error: #b00020;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-serif);
 }
 
 * {
@@ -15,7 +37,20 @@ body {
   padding: 0 1rem 3rem;
   max-width: 40rem;
   margin-inline: auto;
-  line-height: 1.5;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+h1,
+h2,
+label,
+button,
+.pill {
+  font-family: var(--font-sans);
+  font-weight: 700;
 }
 
 header {
@@ -24,13 +59,28 @@ header {
 
 h1 {
   margin-block-end: 0.25rem;
+  color: var(--ink);
+}
+
+header p {
+  color: var(--ink-soft);
 }
 
 section {
   margin-block: 1.5rem;
   padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 0.75rem;
+}
+
+#medication-list-heading {
+  color: var(--ink);
+}
+
+#empty-state {
+  color: var(--ink-soft);
+  font-style: italic;
 }
 
 .form-row {
@@ -41,40 +91,60 @@ section {
 }
 
 label {
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 0.85rem;
 }
 
 input {
   padding: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 0.25rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.4rem;
   font-size: 1rem;
+  font-family: var(--font-serif);
+  background: #fff;
+  color: var(--ink);
 }
 
 input:focus-visible,
 button:focus-visible {
-  outline: 3px solid #2563eb;
-  outline-offset: 1px;
+  outline: 3px solid var(--go);
+  outline-offset: 2px;
 }
 
 button {
-  padding: 0.6rem 1.2rem;
+  padding: 0.55em 1.1em;
   border: none;
-  border-radius: 0.25rem;
-  background: #2563eb;
-  color: white;
+  border-radius: 7px;
+  background: var(--go);
+  color: #fff;
   font-size: 1rem;
+  font-family: var(--font-sans);
+  font-weight: 700;
   cursor: pointer;
 }
 
 button:hover {
-  background: #1d4ed8;
+  background: #255a43;
+}
+
+/* Not used yet (Stop is MED-11 scope) — kept so a `.btn.stop` variant can be
+   dropped onto a button later without restructuring the button system. */
+.btn.stop {
+  background: #fff;
+  color: var(--wait);
+  border: 1px solid var(--wait-line);
+}
+
+.btn.stop:hover {
+  background: var(--wait-soft);
 }
 
 .form-error {
-  color: var(--error);
+  color: var(--danger);
   min-height: 1.25rem;
   margin: 0 0 0.5rem;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
 }
 
 .form-error:empty {
@@ -90,17 +160,27 @@ button:hover {
 .add-medication-trigger {
   font-size: 1.05rem;
   padding: 0.7rem 1.4rem;
+  border-radius: 999px;
+  background: var(--go);
+  color: #fff;
+}
+
+.add-medication-trigger:hover {
+  background: #255a43;
 }
 
 dialog#add-medication-dialog {
   width: min(28rem, calc(100vw - 2rem));
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  padding: 1rem;
+  border: none;
+  border-radius: 14px;
+  padding: 1.25rem;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 24px 60px -16px rgba(23, 34, 42, 0.4);
 }
 
 dialog#add-medication-dialog::backdrop {
-  background: rgb(0 0 0 / 0.5);
+  background: rgba(23, 34, 42, 0.45);
 }
 
 .dialog-header {
@@ -112,18 +192,23 @@ dialog#add-medication-dialog::backdrop {
 
 .dialog-header h2 {
   margin: 0;
+  color: var(--ink);
 }
 
+/* "×" control styling per the design note: small circular hover target,
+   soft ink color at rest, danger color on hover. */
 .close-dialog-btn {
   background: transparent;
-  color: inherit;
-  padding: 0.2rem 0.6rem;
+  color: var(--ink-soft);
+  padding: 0.2rem 0.5rem;
   font-size: 1.25rem;
   line-height: 1;
+  border-radius: 999px;
 }
 
 .close-dialog-btn:hover {
-  background: var(--border);
+  background: var(--panel);
+  color: var(--danger);
 }
 
 .dialog-actions {
@@ -134,12 +219,13 @@ dialog#add-medication-dialog::backdrop {
 
 .dialog-actions button[type="button"] {
   background: transparent;
-  color: inherit;
-  border: 1px solid var(--border);
+  color: var(--ink-soft);
+  border: 1px solid var(--rule);
 }
 
 .dialog-actions button[type="button"]:hover {
-  background: var(--border);
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .medication-list {
@@ -148,22 +234,86 @@ dialog#add-medication-dialog::backdrop {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.9rem;
 }
 
 .medication-item {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem 1rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.25rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: #fff;
+  transition: background 0.2s ease, border-color 0.2s ease;
 }
 
-.medication-info {
-  flex: 1 1 auto;
+@media (prefers-reduced-motion: reduce) {
+  .medication-item {
+    transition: none;
+  }
+}
+
+.medication-item.active {
+  border-color: var(--go-line);
+  background: linear-gradient(to bottom, var(--go-soft), #fff 140px);
+}
+
+.medication-item.cooldown {
+  --progress: 100%;
+  border-color: var(--wait-line);
+  background: linear-gradient(
+    to right,
+    var(--wait-soft) var(--progress, 100%),
+    #fff var(--progress, 100%)
+  );
+}
+
+.medication-header {
+  font-size: 1.05rem;
+}
+
+.medication-name {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.medication-dose {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  color: var(--ink-soft);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.25em 0.75em;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #fff;
+  width: fit-content;
+}
+
+.pill::before {
+  content: "";
+  display: inline-block;
+  width: 0.4em;
+  height: 0.4em;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.pill.go {
+  background: var(--go);
+}
+
+.pill.wait {
+  background: var(--wait);
 }
 
 .interval-field {
@@ -174,8 +324,12 @@ dialog#add-medication-dialog::backdrop {
 
 .interval-field label {
   font-weight: 400;
-  font-size: 0.9rem;
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  color: var(--ink-soft);
   white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .interval-field input {
@@ -183,18 +337,17 @@ dialog#add-medication-dialog::backdrop {
 }
 
 .row-error {
-  flex-basis: 100%;
   margin: 0;
 }
 
 .go-btn {
-  flex: 0 0 auto;
+  align-self: flex-start;
 }
 
 .go-btn:disabled,
 .go-btn[aria-disabled="true"] {
-  background: var(--border);
-  color: #666;
+  background: var(--rule);
+  color: var(--ink-soft);
   cursor: not-allowed;
 }
 
@@ -215,5 +368,5 @@ dialog#add-medication-dialog::backdrop {
 footer {
   margin-block-start: 2rem;
   font-size: 0.85rem;
-  color: #666;
+  color: var(--ink-soft);
 }
