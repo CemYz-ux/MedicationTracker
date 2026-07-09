@@ -337,3 +337,41 @@ test("shows an inline error and leaves the GO button enabled when the localStora
   // enabled, and (per the earlier successful add) storage is unaffected.
   await expect(goButton).toBeEnabled();
 });
+
+test("pressing GO via keyboard keeps focus in place instead of teleporting it to the add-medication trigger", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
+  const addTrigger = page.getByRole("button", { name: "+ Add medication" });
+
+  // The add-medication flow itself returns focus to addTrigger once the
+  // dialog finishes closing; wait for that settle before deliberately
+  // moving focus to the GO button, so the assertion below isn't racing it.
+  await expect(addTrigger).toBeFocused();
+
+  await goButton.focus();
+  await expect(goButton).toBeFocused();
+
+  await page.keyboard.press("Enter");
+
+  await expect(goButton).toBeDisabled();
+  // Regression guard: disabling the button used to steal focus and hand it
+  // to the unrelated "+ Add medication" trigger at the top of the page,
+  // silently as far as a keyboard/screen-reader user is concerned. Focus
+  // must stay somewhere contextual to the action just taken instead.
+  await expect(addTrigger).not.toBeFocused();
+  await expect(goButton).toBeFocused();
+});
+
+test("announces a logged dose to assistive tech via a live status region", async ({ page }) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const status = page.getByRole("status");
+  await expect(status).toHaveText("");
+
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+
+  await expect(status).toHaveText("Aspirin logged.");
+});

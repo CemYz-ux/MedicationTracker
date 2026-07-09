@@ -17,6 +17,7 @@ const closeDialogBtn = document.getElementById("close-dialog-btn");
 const cancelBtn = document.getElementById("cancel-add-btn");
 const list = document.getElementById("medication-list");
 const emptyState = document.getElementById("empty-state");
+const statusAnnouncer = document.getElementById("status-announcer");
 
 let medications = loadMedications(window.localStorage);
 
@@ -35,6 +36,13 @@ function render() {
   for (const medication of medications) {
     list.append(renderMedicationItem(medication));
   }
+}
+
+// Sets the GO button's disabled-looking state via `aria-disabled` rather
+// than the native `disabled` attribute — see the comment where this is
+// first called for why.
+function setGoButtonDisabled(goButton, isDisabled) {
+  goButton.setAttribute("aria-disabled", String(isDisabled));
 }
 
 function renderMedicationItem(medication) {
@@ -107,13 +115,23 @@ function renderMedicationItem(medication) {
   // collide with `getByLabel("Dose")`'s substring match against the
   // add-medication form's Dose field in the Playwright E2E suite.
   goButton.setAttribute("aria-label", `GO — log ${medication.name} taken`);
-  goButton.disabled = Boolean(medication.lastTakenAt);
+  // `aria-disabled` (not the native `disabled` attribute) on purpose: making
+  // an element natively disabled while it holds keyboard focus forces the
+  // browser to move focus elsewhere (observed landing on the unrelated
+  // "+ Add medication" trigger), with no announcement to screen readers.
+  // aria-disabled keeps the button focusable — the click handler below
+  // no-ops instead — so focus simply stays where the user left it.
+  setGoButtonDisabled(goButton, Boolean(medication.lastTakenAt));
 
   const goError = document.createElement("p");
   goError.className = "form-error row-error go-error";
   goError.setAttribute("role", "alert");
 
   goButton.addEventListener("click", () => {
+    if (goButton.getAttribute("aria-disabled") === "true") {
+      return;
+    }
+
     try {
       const updated = logDose(medications, medication.id);
       // If the write fails (e.g. storage full/unavailable), this throws
@@ -122,7 +140,8 @@ function renderMedicationItem(medication) {
       saveMedications(updated, window.localStorage);
       medications = updated;
       goError.textContent = "";
-      goButton.disabled = true;
+      setGoButtonDisabled(goButton, true);
+      statusAnnouncer.textContent = `${medication.name} logged.`;
     } catch {
       goError.textContent = "Could not log dose — please try again.";
     }
