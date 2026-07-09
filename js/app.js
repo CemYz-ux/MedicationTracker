@@ -3,6 +3,7 @@ import {
   saveMedications,
   addMedication,
   updateMedicationInterval,
+  logDose,
 } from "./medications.js";
 
 const trigger = document.getElementById("add-medication-trigger");
@@ -91,7 +92,43 @@ function renderMedicationItem(medication) {
   });
 
   intervalField.append(intervalLabel, intervalRowInput);
-  item.append(info, intervalField, rowError);
+
+  // MED-7 scope only: pressing GO records `lastTakenAt` and disables this
+  // button so it can't be pressed again. It intentionally does not compute
+  // or display a countdown/remaining-time (MED-8) and does not re-enable
+  // once an interval elapses (MED-9) — "has lastTakenAt been set" is the
+  // entire disabled-state rule for this story.
+  const goButton = document.createElement("button");
+  goButton.type = "button";
+  goButton.className = "go-btn";
+  goButton.id = `go-${medication.id}`;
+  goButton.textContent = "GO";
+  // Wording deliberately avoids the substring "dose" — it would otherwise
+  // collide with `getByLabel("Dose")`'s substring match against the
+  // add-medication form's Dose field in the Playwright E2E suite.
+  goButton.setAttribute("aria-label", `GO — log ${medication.name} taken`);
+  goButton.disabled = Boolean(medication.lastTakenAt);
+
+  const goError = document.createElement("p");
+  goError.className = "form-error row-error go-error";
+  goError.setAttribute("role", "alert");
+
+  goButton.addEventListener("click", () => {
+    try {
+      const updated = logDose(medications, medication.id);
+      // If the write fails (e.g. storage full/unavailable), this throws
+      // before `medications` or the button's disabled state are touched —
+      // the UI must not imply the dose was logged when it wasn't persisted.
+      saveMedications(updated, window.localStorage);
+      medications = updated;
+      goError.textContent = "";
+      goButton.disabled = true;
+    } catch {
+      goError.textContent = "Could not log dose — please try again.";
+    }
+  });
+
+  item.append(info, intervalField, goButton, rowError, goError);
   return item;
 }
 

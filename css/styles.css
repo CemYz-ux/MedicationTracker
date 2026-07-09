@@ -187,6 +187,16 @@ dialog#add-medication-dialog::backdrop {
   margin: 0;
 }
 
+.go-btn {
+  flex: 0 0 auto;
+}
+
+.go-btn:disabled {
+  background: var(--border);
+  color: #666;
+  cursor: not-allowed;
+}
+
 footer {
   margin-block-start: 2rem;
   font-size: 0.85rem;

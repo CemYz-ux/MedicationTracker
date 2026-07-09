@@ -248,3 +248,92 @@ test("after a successful interval edit, a later invalid edit retains the newly s
 
   await expect(page.getByLabel("Interval (hours)").last()).toHaveValue("12");
 });
+
+async function addMedicationViaUi(page, { name, dose, interval }) {
+  await page.getByRole("button", { name: "+ Add medication" }).click();
+
+  // Scoped to the dialog: once a medication row already exists in the list,
+  // its own "Interval (hours)" field would otherwise also match
+  // getByLabel("Interval (hours)") and trip Playwright's strict-mode check.
+  const dialog = page.getByRole("dialog", { name: "Add medication" });
+  await dialog.getByLabel("Name").fill(name);
+  await dialog.getByLabel("Dose").fill(dose);
+  await dialog.getByLabel("Interval (hours)").fill(interval);
+  await page.getByRole("button", { name: "Add medication", exact: true }).click();
+}
+
+test("pressing GO records the current timestamp, persists it, and disables that medication's GO button", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
+  await expect(goButton).toBeEnabled();
+
+  const before = Date.now();
+  await goButton.click();
+  const after = Date.now();
+
+  await expect(goButton).toBeDisabled();
+
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("medications"))
+  );
+  expect(stored).toHaveLength(1);
+  const loggedTime = new Date(stored[0].lastTakenAt).getTime();
+  expect(loggedTime).toBeGreaterThanOrEqual(before);
+  expect(loggedTime).toBeLessThanOrEqual(after);
+
+  // Disabled state survives a reload too, since it's driven by the
+  // persisted lastTakenAt, not just in-memory UI state.
+  await page.reload();
+  await expect(page.getByRole("button", { name: "GO — log Aspirin taken" })).toBeDisabled();
+});
+
+test("pressing GO on one medication does not affect another medication's GO button or timestamp", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+
+  const aspirinGo = page.getByRole("button", { name: "GO — log Aspirin taken" });
+  const ibuprofenGo = page.getByRole("button", { name: "GO — log Ibuprofen taken" });
+
+  await aspirinGo.click();
+
+  await expect(aspirinGo).toBeDisabled();
+  await expect(ibuprofenGo).toBeEnabled();
+
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("medications"))
+  );
+  const aspirin = stored.find((medication) => medication.name === "Aspirin");
+  const ibuprofen = stored.find((medication) => medication.name === "Ibuprofen");
+  expect(aspirin.lastTakenAt).not.toBeNull();
+  expect(ibuprofen.lastTakenAt).toBeNull();
+});
+
+test("shows an inline error and leaves the GO button enabled when the localStorage write fails", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  // Simulate a storage failure (e.g. quota exceeded) for writes made after
+  // this point, without touching the add-medication flow that already
+  // succeeded above.
+  await page.evaluate(() => {
+    window.localStorage.setItem = () => {
+      throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+    };
+  });
+
+  const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
+  await goButton.click();
+
+  await expect(page.getByRole("alert").last()).toHaveText(
+    "Could not log dose — please try again."
+  );
+  // The displayed state must not imply the dose was logged: button stays
+  // enabled, and (per the earlier successful add) storage is unaffected.
+  await expect(goButton).toBeEnabled();
+});
