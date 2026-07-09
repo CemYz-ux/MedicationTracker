@@ -141,6 +141,11 @@ function renderMedicationItem(medication) {
       medications = updated;
       goError.textContent = "";
       setGoButtonDisabled(goButton, true);
+      // Don't rely on aria-disabled's implicit "focus stays put" behavior —
+      // it's a browser/Chromium-version-dependent quirk, not a guarantee.
+      // Explicitly reassert focus here so it deterministically stays on
+      // (or returns to) this button on every platform.
+      goButton.focus();
       statusAnnouncer.textContent = `${medication.name} logged.`;
     } catch {
       goError.textContent = "Could not log dose — please try again.";
