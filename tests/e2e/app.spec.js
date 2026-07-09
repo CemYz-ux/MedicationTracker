@@ -446,7 +446,16 @@ test("pressing Enter a second time on an already-cooldown GO button does not rec
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
   const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
+  const addTrigger = page.getByRole("button", { name: "+ Add medication" });
+
+  // The add-medication flow itself returns focus to addTrigger once the
+  // dialog finishes closing; wait for that settle before deliberately
+  // moving focus to the GO button, so the keyboard press below isn't racing
+  // that async refocus on a slower CI runner.
+  await expect(addTrigger).toBeFocused();
+
   await goButton.focus();
+  await expect(goButton).toBeFocused();
   await page.keyboard.press("Enter");
 
   const before = await page.evaluate(() =>
@@ -459,6 +468,7 @@ test("pressing Enter a second time on an already-cooldown GO button does not rec
   // a second real keyboard activation is a no-op, per the AC's "cannot be
   // activated by mouse, keyboard, or Enter" requirement.
   await goButton.focus();
+  await expect(goButton).toBeFocused();
   await page.keyboard.press("Enter");
 
   const after = await page.evaluate(() =>
