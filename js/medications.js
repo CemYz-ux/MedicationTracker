@@ -109,6 +109,13 @@ export function removeMedication(medications, id) {
  * other field — and every other medication in the list — is left untouched,
  * so logging one dose can never affect another medication's state (MED-7).
  *
+ * Also snapshots the medication's *current* `intervalHours` into
+ * `cooldownIntervalHours`. This is what the cooldown math below reads —
+ * not the live, editable `intervalHours` — so that editing the interval
+ * mid-cooldown (MED-5) can never retroactively change a countdown that's
+ * already running (MED-8 AC). The next GO press re-snapshots it from
+ * whatever `intervalHours` is at that later point.
+ *
  * `now` (epoch millis) is injectable for deterministic tests; it defaults to
  * `Date.now()`. This story only records the timestamp — it does not decide
  * whether GO *should* be pressable (that's the DOM layer, reading
@@ -121,7 +128,108 @@ export function logDose(medications, id, now = Date.now()) {
   const takenAt = new Date(now).toISOString();
   return medications.map((medication) =>
     medication.id === id
-      ? { ...medication, lastTakenAt: takenAt }
+      ? {
+          ...medication,
+          lastTakenAt: takenAt,
+          cooldownIntervalHours: medication.intervalHours,
+        }
       : medication
   );
+}
+
+/**
+ * The interval (in hours) that governs the medication's *current* cooldown.
+ * Prefers the snapshot taken by `logDose` (`cooldownIntervalHours`) over the
+ * live, editable `intervalHours`, so a later edit never disturbs a running
+ * cooldown's timing (MED-5/MED-8). Falls back to `intervalHours` for
+ * medications logged before this field existed, or that have never been
+ * logged at all.
+ */
+function cooldownIntervalHoursFor(medication) {
+  const snapshot = medication.cooldownIntervalHours;
+  return Number.isFinite(snapshot) && snapshot > 0
+    ? snapshot
+    : medication.intervalHours;
+}
+
+function cooldownReadyAt(medication) {
+  const takenAtMs = new Date(medication.lastTakenAt).getTime();
+  return takenAtMs + cooldownIntervalHoursFor(medication) * 60 * 60 * 1000;
+}
+
+/**
+ * True when `medication` was logged and its interval (as it stood at the
+ * moment GO was pressed — see `logDose`) has not yet fully elapsed, i.e.
+ * `now < lastTakenAt + cooldownIntervalHours`. A medication that has never
+ * been logged (`lastTakenAt` is `null`) is never in cooldown. `now` (epoch
+ * millis) is injectable for deterministic tests; it defaults to `Date.now()`.
+ */
+export function isInCooldown(medication, now = Date.now()) {
+  if (!medication.lastTakenAt) return false;
+  return now < cooldownReadyAt(medication);
+}
+
+/**
+ * Milliseconds remaining until `medication`'s cooldown ends, clamped to 0
+ * once it has elapsed (or if it was never logged).
+ */
+export function getCooldownRemainingMs(medication, now = Date.now()) {
+  if (!medication.lastTakenAt) return 0;
+  return Math.max(0, cooldownReadyAt(medication) - now);
+}
+
+/**
+ * The total length (in milliseconds) of `medication`'s current cooldown —
+ * i.e. the interval that was active when GO was last pressed, not
+ * necessarily the live `intervalHours`. Meaningful even when not currently
+ * in cooldown (reflects whatever the last logged interval was).
+ */
+export function getCooldownTotalMs(medication) {
+  return cooldownIntervalHoursFor(medication) * 60 * 60 * 1000;
+}
+
+/**
+ * Fraction (0–1) of `medication`'s cooldown that remains, for driving the
+ * card's fill: 1 the instant GO is pressed, receding toward 0 as time
+ * passes, and exactly 0 once cooldown has ended. Always 0 when not
+ * currently in cooldown, per the "Active cards show no fill" AC.
+ */
+export function getCooldownProgress(medication, now = Date.now()) {
+  if (!isInCooldown(medication, now)) return 0;
+  const totalMs = getCooldownTotalMs(medication);
+  if (totalMs <= 0) return 0;
+  return getCooldownRemainingMs(medication, now) / totalMs;
+}
+
+/**
+ * Formats a non-negative duration in milliseconds as a short human-readable
+ * string ("3h 12m", "45m", or "5h" when the minutes component is zero).
+ * Rounds up to the nearest minute (`Math.ceil`) rather than truncating, so a
+ * still-running countdown never displays a misleading "0m" in its final
+ * seconds.
+ */
+export function formatDuration(ms) {
+  const totalMinutes = Math.max(0, Math.ceil(ms / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes}m`;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
+}
+
+/**
+ * The countdown text shown on a cooldown card, e.g. "3h 12m of 5h
+ * remaining" — remaining time, then the total interval that was active when
+ * GO was pressed (per `getCooldownTotalMs`). Returns `null` when the
+ * medication is not currently in cooldown, so callers know not to render it.
+ *
+ * Format confirmed by product owner on 2026-07-09 (MED-8 ticket comment):
+ * "{remaining} of {total} remaining", not the bare "{remaining} remaining"
+ * wording in the story's acceptance-criteria text.
+ */
+export function formatCountdown(medication, now = Date.now()) {
+  if (!isInCooldown(medication, now)) return null;
+  const remaining = formatDuration(getCooldownRemainingMs(medication, now));
+  const total = formatDuration(getCooldownTotalMs(medication));
+  return `${remaining} of ${total} remaining`;
 }

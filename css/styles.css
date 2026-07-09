@@ -246,7 +246,7 @@ dialog#add-medication-dialog::backdrop {
   border: 1px solid var(--rule);
   border-radius: 10px;
   background: #fff;
-  transition: background 0.2s ease, border-color 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, --progress 0.2s ease;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -314,6 +314,16 @@ dialog#add-medication-dialog::backdrop {
 
 .pill.wait {
   background: var(--wait);
+}
+
+/* Live countdown text on a cooldown card, e.g. "3h 12m of 5h remaining" —
+   supplementary to the card's `--progress` fill, never a substitute for it. */
+.cooldown-countdown {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--wait);
 }
 
 .interval-field {

@@ -375,3 +375,162 @@ test("announces a logged dose to assistive tech via a live status region", async
 
   await expect(status).toHaveText("Aspirin logged.");
 });
+
+// --- MED-8: cooldown countdown + fill ---------------------------------
+
+test("shows a live countdown in '{remaining} of {total} remaining' format after pressing GO, and the fill starts at 100%", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+
+  // Just pressed, so remaining ~= total: both round to "8h" (no minutes
+  // have elapsed yet), giving a deterministic assertion without needing to
+  // fast-forward any clock.
+  await expect(page.getByText("8h of 8h remaining")).toBeVisible();
+
+  const item = page.locator(".medication-item.cooldown");
+  await expect(item).toHaveCSS("--progress", "100%");
+});
+
+test("shows no fill or countdown text on an Active (non-cooldown) card", async ({ page }) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/active/);
+  await expect(item).not.toHaveClass(/cooldown/);
+  await expect(item.locator(".cooldown-countdown")).toBeHidden();
+});
+
+test("a forced click on a functionally-disabled GO button does not record a new dose (enforced in logic, not just the attribute)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
+  await goButton.click();
+
+  const before = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("medications"))
+  );
+  expect(before[0].lastTakenAt).not.toBeNull();
+  const firstTimestamp = before[0].lastTakenAt;
+
+  // Falsify the fast `aria-disabled` guard first, so the attribute check
+  // alone can no longer be the thing that blocks this click — only the
+  // click handler's independent `isInCooldown` recheck (re-derived from
+  // `medications`, not the DOM) stands between this click and a bogus
+  // dose log. Without this step, dispatching a forced click while
+  // `aria-disabled="true"` is still present would pass even if the logic
+  // guard were removed entirely, since the attribute check alone catches
+  // it — proving nothing about the second guard.
+  await goButton.evaluate((button) => button.setAttribute("aria-disabled", "false"));
+
+  // Bypass Playwright's actionability checks (which would refuse to click
+  // an aria-disabled element) by dispatching the click event directly —
+  // this simulates a forced/programmatic invocation of the control.
+  await goButton.evaluate((button) =>
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+  );
+
+  const after = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("medications"))
+  );
+  expect(after[0].lastTakenAt).toBe(firstTimestamp);
+});
+
+test("pressing Enter a second time on an already-cooldown GO button does not record a new dose", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
+  const addTrigger = page.getByRole("button", { name: "+ Add medication" });
+
+  // The add-medication flow itself returns focus to addTrigger once the
+  // dialog finishes closing; wait for that settle before deliberately
+  // moving focus to the GO button, so the keyboard press below isn't racing
+  // that async refocus on a slower CI runner.
+  await expect(addTrigger).toBeFocused();
+
+  await goButton.focus();
+  await expect(goButton).toBeFocused();
+  await page.keyboard.press("Enter");
+
+  const before = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("medications"))
+  );
+  expect(before[0].lastTakenAt).not.toBeNull();
+  const firstTimestamp = before[0].lastTakenAt;
+
+  // Button is now aria-disabled (in cooldown) but still focusable — confirm
+  // a second real keyboard activation is a no-op, per the AC's "cannot be
+  // activated by mouse, keyboard, or Enter" requirement.
+  await goButton.focus();
+  await expect(goButton).toBeFocused();
+  await page.keyboard.press("Enter");
+
+  const after = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("medications"))
+  );
+  expect(after[0].lastTakenAt).toBe(firstTimestamp);
+});
+
+test("the fill recedes proportionally to elapsed cooldown time, and reactivation + zero fill happen together", async ({
+  page,
+}) => {
+  // Install fake timers before the module (re-)loads, so its setInterval is
+  // registered against the fake clock and can be fast-forwarded
+  // deterministically instead of waiting on real wall-clock time.
+  await page.clock.install();
+  await page.reload();
+
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/cooldown/);
+  await expect(item).toHaveCSS("--progress", "100%");
+
+  // Halfway through an 8h interval: left half of the card stays coloured.
+  await page.clock.fastForward(4 * 60 * 60 * 1000);
+  await expect(item).toHaveCSS("--progress", "50%");
+  await expect(page.getByText("4h of 8h remaining")).toBeVisible();
+
+  const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
+  await expect(goButton).toBeDisabled();
+
+  // Past the full interval: the periodic re-check (no reload, no user
+  // action) must flip the card back to Active with GO enabled and the fill
+  // at exactly 0%, in the same update — never one visibly ahead of the other.
+  await page.clock.fastForward(4 * 60 * 60 * 1000 + 60_000);
+  await expect(item).toHaveClass(/active/);
+  await expect(item).not.toHaveClass(/cooldown/);
+  await expect(goButton).toBeEnabled();
+  await expect(item.locator(".cooldown-countdown")).toBeHidden();
+});
+
+test("editing the interval mid-cooldown does not disturb the running countdown/fill (MED-5 invariant)", async ({
+  page,
+}) => {
+  await page.clock.install();
+  await page.reload();
+
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+
+  // Edit the interval down to 2h while the 8h cooldown from GO is running.
+  const intervalInput = page.getByLabel("Interval (hours)").last();
+  await intervalInput.fill("2");
+  await intervalInput.blur();
+
+  // 3h elapsed: past the *edited* 2h interval, but well inside the
+  // *original* 8h one — the countdown/fill must still reflect the latter.
+  await page.clock.fastForward(3 * 60 * 60 * 1000);
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/cooldown/);
+  await expect(page.getByText("5h of 8h remaining")).toBeVisible();
+  await expect(page.getByRole("button", { name: "GO — log Aspirin taken" })).toBeDisabled();
+});

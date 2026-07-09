@@ -8,6 +8,12 @@ import {
   validateMedication,
   validateInterval,
   logDose,
+  isInCooldown,
+  getCooldownRemainingMs,
+  getCooldownTotalMs,
+  getCooldownProgress,
+  formatDuration,
+  formatCountdown,
 } from "../../js/medications.js";
 
 function createMemoryStorage() {
@@ -320,5 +326,173 @@ describe("logDose", () => {
     ];
     const result = logDose(meds, "nope", Date.now());
     expect(result).toEqual(meds);
+  });
+
+  it("snapshots the current intervalHours into cooldownIntervalHours (MED-8)", () => {
+    const meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+    ];
+    const result = logDose(meds, "1", Date.now());
+    expect(result[0].cooldownIntervalHours).toBe(8);
+  });
+});
+
+describe("isInCooldown", () => {
+  const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+  const med = {
+    id: "1",
+    name: "Aspirin",
+    dose: "100mg",
+    intervalHours: 1,
+    cooldownIntervalHours: 1,
+    lastTakenAt: new Date(takenAt).toISOString(),
+  };
+  const readyAt = takenAt + 60 * 60 * 1000;
+
+  it("is false when the medication has never been logged", () => {
+    expect(isInCooldown({ ...med, lastTakenAt: null }, takenAt)).toBe(false);
+  });
+
+  it("is true just before the ready time", () => {
+    expect(isInCooldown(med, readyAt - 1)).toBe(true);
+  });
+
+  it("is false exactly at the ready time (now >= lastTaken + interval)", () => {
+    expect(isInCooldown(med, readyAt)).toBe(false);
+  });
+
+  it("is false just after the ready time", () => {
+    expect(isInCooldown(med, readyAt + 1)).toBe(false);
+  });
+
+  it("is true at the moment of logging", () => {
+    expect(isInCooldown(med, takenAt)).toBe(true);
+  });
+});
+
+describe("cooldown interval snapshot freezes against an edit (MED-5/MED-8 invariant)", () => {
+  it("computes remaining time against the interval active at logDose time, not a later edit", () => {
+    let meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+    ];
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+
+    meds = logDose(meds, "1", takenAt);
+    // Mid-cooldown edit: interval drops from 8 to 2 hours.
+    meds = updateMedicationInterval(meds, "1", 2);
+
+    const threeHoursLater = takenAt + 3 * 60 * 60 * 1000;
+
+    // With the *edited* 2h interval, this medication would already have
+    // reactivated by now (3h > 2h). The frozen 8h snapshot says otherwise.
+    expect(isInCooldown(meds[0], threeHoursLater)).toBe(true);
+    expect(getCooldownRemainingMs(meds[0], threeHoursLater)).toBe(
+      5 * 60 * 60 * 1000
+    );
+    expect(getCooldownTotalMs(meds[0])).toBe(8 * 60 * 60 * 1000);
+
+    // The edited value is still there, ready to govern the *next* GO press.
+    expect(meds[0].intervalHours).toBe(2);
+  });
+
+  it("falls back to intervalHours for a medication logged before cooldownIntervalHours existed", () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const legacyMed = {
+      id: "1",
+      name: "Aspirin",
+      dose: "100mg",
+      intervalHours: 4,
+      lastTakenAt: new Date(takenAt).toISOString(),
+      // No cooldownIntervalHours field at all.
+    };
+    expect(getCooldownTotalMs(legacyMed)).toBe(4 * 60 * 60 * 1000);
+    expect(isInCooldown(legacyMed, takenAt + 60 * 60 * 1000)).toBe(true);
+  });
+});
+
+describe("getCooldownProgress", () => {
+  const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+  const totalMs = 8 * 60 * 60 * 1000;
+  const med = {
+    id: "1",
+    name: "Aspirin",
+    dose: "100mg",
+    intervalHours: 8,
+    cooldownIntervalHours: 8,
+    lastTakenAt: new Date(takenAt).toISOString(),
+  };
+
+  it("is 1 (100%) at the instant GO is pressed", () => {
+    expect(getCooldownProgress(med, takenAt)).toBe(1);
+  });
+
+  it("is 0.75 after 25% of the interval has elapsed", () => {
+    expect(getCooldownProgress(med, takenAt + totalMs * 0.25)).toBeCloseTo(0.75);
+  });
+
+  it("is 0.5 at the halfway point", () => {
+    expect(getCooldownProgress(med, takenAt + totalMs * 0.5)).toBeCloseTo(0.5);
+  });
+
+  it("is 0.25 after 75% of the interval has elapsed", () => {
+    expect(getCooldownProgress(med, takenAt + totalMs * 0.75)).toBeCloseTo(0.25);
+  });
+
+  it("is exactly 0 once the interval has fully elapsed", () => {
+    expect(getCooldownProgress(med, takenAt + totalMs)).toBe(0);
+  });
+
+  it("is 0 for a medication that is not in cooldown", () => {
+    expect(getCooldownProgress({ ...med, lastTakenAt: null }, takenAt)).toBe(0);
+  });
+});
+
+describe("formatDuration", () => {
+  it("formats whole hours with no minutes component", () => {
+    expect(formatDuration(5 * 60 * 60 * 1000)).toBe("5h");
+  });
+
+  it("formats hours and minutes together", () => {
+    expect(formatDuration((3 * 60 + 12) * 60 * 1000)).toBe("3h 12m");
+  });
+
+  it("formats minutes-only durations with no hours component", () => {
+    expect(formatDuration(45 * 60 * 1000)).toBe("45m");
+  });
+
+  it("rounds up to the nearest minute rather than truncating", () => {
+    // 44 minutes 30 seconds should read as 45m, not 44m.
+    expect(formatDuration(44.5 * 60 * 1000)).toBe("45m");
+  });
+
+  it("clamps negative durations to zero", () => {
+    expect(formatDuration(-1000)).toBe("0m");
+  });
+});
+
+describe("formatCountdown", () => {
+  it('formats as "{remaining} of {total} remaining" (PO-confirmed wording)', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const med = {
+      id: "1",
+      name: "Aspirin",
+      dose: "100mg",
+      intervalHours: 5,
+      cooldownIntervalHours: 5,
+      lastTakenAt: new Date(takenAt).toISOString(),
+    };
+    const now = takenAt + (1 * 60 + 48) * 60 * 1000; // 1h48m elapsed of 5h
+    expect(formatCountdown(med, now)).toBe("3h 12m of 5h remaining");
+  });
+
+  it("returns null when the medication is not in cooldown", () => {
+    const med = {
+      id: "1",
+      name: "Aspirin",
+      dose: "100mg",
+      intervalHours: 5,
+      lastTakenAt: null,
+    };
+    expect(formatCountdown(med, Date.now())).toBeNull();
   });
 });
