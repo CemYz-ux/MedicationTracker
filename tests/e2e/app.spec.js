@@ -417,12 +417,49 @@ test("a forced click on a functionally-disabled GO button does not record a new 
   expect(before[0].lastTakenAt).not.toBeNull();
   const firstTimestamp = before[0].lastTakenAt;
 
+  // Falsify the fast `aria-disabled` guard first, so the attribute check
+  // alone can no longer be the thing that blocks this click — only the
+  // click handler's independent `isInCooldown` recheck (re-derived from
+  // `medications`, not the DOM) stands between this click and a bogus
+  // dose log. Without this step, dispatching a forced click while
+  // `aria-disabled="true"` is still present would pass even if the logic
+  // guard were removed entirely, since the attribute check alone catches
+  // it — proving nothing about the second guard.
+  await goButton.evaluate((button) => button.setAttribute("aria-disabled", "false"));
+
   // Bypass Playwright's actionability checks (which would refuse to click
   // an aria-disabled element) by dispatching the click event directly —
   // this simulates a forced/programmatic invocation of the control.
   await goButton.evaluate((button) =>
     button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
   );
+
+  const after = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("medications"))
+  );
+  expect(after[0].lastTakenAt).toBe(firstTimestamp);
+});
+
+test("pressing Enter a second time on an already-cooldown GO button does not record a new dose", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
+  await goButton.focus();
+  await page.keyboard.press("Enter");
+
+  const before = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("medications"))
+  );
+  expect(before[0].lastTakenAt).not.toBeNull();
+  const firstTimestamp = before[0].lastTakenAt;
+
+  // Button is now aria-disabled (in cooldown) but still focusable — confirm
+  // a second real keyboard activation is a no-op, per the AC's "cannot be
+  // activated by mouse, keyboard, or Enter" requirement.
+  await goButton.focus();
+  await page.keyboard.press("Enter");
 
   const after = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("medications"))
