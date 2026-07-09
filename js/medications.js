@@ -101,3 +101,27 @@ export function updateMedicationInterval(medications, id, newIntervalHours) {
 export function removeMedication(medications, id) {
   return medications.filter((medication) => medication.id !== id);
 }
+
+/**
+ * Returns a new list where the medication matching `id` has `lastTakenAt`
+ * set to the current time, recorded as an ISO string so it round-trips
+ * through JSON/localStorage the same way every other field does. Every
+ * other field — and every other medication in the list — is left untouched,
+ * so logging one dose can never affect another medication's state (MED-7).
+ *
+ * `now` (epoch millis) is injectable for deterministic tests; it defaults to
+ * `Date.now()`. This story only records the timestamp — it does not decide
+ * whether GO *should* be pressable (that's the DOM layer, reading
+ * `lastTakenAt`) and it does not compute cooldown/reactivation (MED-9).
+ *
+ * If `id` does not match any medication, the returned list is equivalent to
+ * the input (no-op), mirroring `removeMedication`'s behavior.
+ */
+export function logDose(medications, id, now = Date.now()) {
+  const takenAt = new Date(now).toISOString();
+  return medications.map((medication) =>
+    medication.id === id
+      ? { ...medication, lastTakenAt: takenAt }
+      : medication
+  );
+}

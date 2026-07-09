@@ -187,6 +187,31 @@ dialog#add-medication-dialog::backdrop {
   margin: 0;
 }
 
+.go-btn {
+  flex: 0 0 auto;
+}
+
+.go-btn:disabled,
+.go-btn[aria-disabled="true"] {
+  background: var(--border);
+  color: #666;
+  cursor: not-allowed;
+}
+
+/* Visually hides content while keeping it in the accessibility tree, so
+   screen readers still announce it (e.g. the live status region). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 footer {
   margin-block-start: 2rem;
   font-size: 0.85rem;

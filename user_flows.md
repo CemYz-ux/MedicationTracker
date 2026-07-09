@@ -18,9 +18,20 @@ Living source of truth for what the site does. Update this file with every featu
 **Status:** Implemented
 **Flow:**
 1. On page load, previously logged medications are read from `localStorage` and rendered in a list.
-2. Each row shows the medication's name, dose, and an editable Interval (hours) input — nothing else (no GO button, cooldown display, or delete control; those belong to later stories).
+2. Each row shows the medication's name, dose, an editable Interval (hours) input, and a GO button (see "Log a dose (press GO)" below) — no cooldown countdown or delete control yet; those belong to later stories.
 3. If there are no medications (including corrupted/missing stored data), an empty-state message ("No medications logged yet.") is shown instead of the list.
 4. Records left over from the old prototype schema (`{id, name, dose, time}`, no `intervalHours`) are silently discarded on load rather than shown or migrated.
+
+## Log a dose (press GO)
+**Status:** Implemented
+**Flow:**
+1. Every medication row shows a GO button, labeled for assistive tech as "GO — log {medication name} taken".
+2. Pressing GO (click, or Enter/Space via keyboard) records the current time as that medication's `lastTakenAt` and saves it to `localStorage`.
+3. Once logged, that medication's GO button becomes disabled (via `aria-disabled`, not the native `disabled` attribute, so keyboard focus is not forcibly moved elsewhere) and stays disabled across a page reload, since the disabled state is driven by the persisted `lastTakenAt`, not in-memory UI state alone.
+4. A screen-reader-only status message ("{medication name} logged.") is announced via a page-level `aria-live="polite"` region when a dose is successfully logged.
+5. If saving fails (e.g. storage full/unavailable), an inline error ("Could not log dose — please try again.") is shown next to that row, the GO button stays enabled, and nothing is written to storage — the UI never implies a dose was logged when it wasn't persisted.
+6. Logging one medication's dose does not affect any other medication's GO button, timestamp, or interval.
+7. Out of scope for this flow (separate stories): no cooldown/remaining-time countdown display (MED-8) and no automatic re-enabling of the GO button once the interval elapses (MED-9).
 
 ## Edit a medication's interval
 **Status:** Implemented

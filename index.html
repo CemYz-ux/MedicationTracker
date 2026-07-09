@@ -54,6 +54,11 @@
     </section>
   </main>
 
+  <!-- Visually-hidden live region announcing successful actions (e.g. a
+       logged dose) to screen readers; errors already have their own
+       visible, per-row role="alert" elements so they don't need this. -->
+  <p id="status-announcer" class="visually-hidden" role="status" aria-live="polite"></p>
+
   <footer>
     <p>Data is stored only in your browser. Nothing is sent to a server.</p>
   </footer>

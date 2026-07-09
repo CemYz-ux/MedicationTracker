@@ -7,6 +7,7 @@ import {
   removeMedication,
   validateMedication,
   validateInterval,
+  logDose,
 } from "../../js/medications.js";
 
 function createMemoryStorage() {
@@ -258,5 +259,66 @@ describe("removeMedication", () => {
   it("returns an equivalent list when the id is not found", () => {
     const meds = [{ id: "1", name: "A" }];
     expect(removeMedication(meds, "nope")).toEqual(meds);
+  });
+});
+
+describe("logDose", () => {
+  it("sets lastTakenAt to the given time, formatted as an ISO string", () => {
+    const meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+    ];
+    const now = new Date("2026-07-09T12:00:00.000Z").getTime();
+    const result = logDose(meds, "1", now);
+    expect(result[0].lastTakenAt).toBe("2026-07-09T12:00:00.000Z");
+  });
+
+  it("defaults to the current time when `now` is not provided", () => {
+    const meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+    ];
+    const before = Date.now();
+    const result = logDose(meds, "1");
+    const after = Date.now();
+    const loggedTime = new Date(result[0].lastTakenAt).getTime();
+    expect(loggedTime).toBeGreaterThanOrEqual(before);
+    expect(loggedTime).toBeLessThanOrEqual(after);
+  });
+
+  it("preserves every other field of the logged medication", () => {
+    const meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+    ];
+    const result = logDose(meds, "1", Date.now());
+    expect(result[0]).toMatchObject({
+      id: "1",
+      name: "Aspirin",
+      dose: "100mg",
+      intervalHours: 8,
+    });
+  });
+
+  it("does not affect other medications in the list (isolation across medications)", () => {
+    const meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+      { id: "2", name: "Ibuprofen", dose: "200mg", intervalHours: 6, lastTakenAt: null },
+    ];
+    const result = logDose(meds, "1", Date.now());
+    expect(result[1]).toEqual(meds[1]);
+  });
+
+  it("does not mutate the original list", () => {
+    const meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+    ];
+    logDose(meds, "1", Date.now());
+    expect(meds[0].lastTakenAt).toBeNull();
+  });
+
+  it("returns an equivalent list when the id is not found", () => {
+    const meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+    ];
+    const result = logDose(meds, "nope", Date.now());
+    expect(result).toEqual(meds);
   });
 });
