@@ -410,6 +410,45 @@ describe("cooldown interval snapshot freezes against an edit (MED-5/MED-8 invari
   });
 });
 
+describe("reactivation starts a fresh cooldown cycle, no carryover from the prior cycle (MED-9 AC3)", () => {
+  it("a second logDose after natural reactivation governs cooldown by the new interval and new timestamp only", () => {
+    let meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+    ];
+    const firstTakenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+
+    // First cycle: GO pressed with an 8h interval.
+    meds = logDose(meds, "1", firstTakenAt);
+    expect(meds[0].cooldownIntervalHours).toBe(8);
+
+    // Well past the first 8h cycle: medication has naturally reactivated.
+    const reactivatedAt = firstTakenAt + 9 * 60 * 60 * 1000;
+    expect(isInCooldown(meds[0], reactivatedAt)).toBe(false);
+
+    // Interval changes to 3h while the medication is sitting Active.
+    meds = updateMedicationInterval(meds, "1", 3);
+
+    // GO pressed again, with a fresh timestamp — this must start an
+    // entirely new cycle, not resume or extend the old 8h one.
+    const secondTakenAt = reactivatedAt + 60 * 60 * 1000;
+    meds = logDose(meds, "1", secondTakenAt);
+
+    expect(meds[0].lastTakenAt).toBe(new Date(secondTakenAt).toISOString());
+    expect(meds[0].cooldownIntervalHours).toBe(3);
+    expect(getCooldownTotalMs(meds[0])).toBe(3 * 60 * 60 * 1000);
+
+    // Just before the new 3h window ends: still in cooldown against the
+    // *new* cycle. (Stale 8h math would have already reactivated it here.)
+    const justBeforeNewReady = secondTakenAt + 3 * 60 * 60 * 1000 - 1;
+    expect(isInCooldown(meds[0], justBeforeNewReady)).toBe(true);
+    expect(getCooldownRemainingMs(meds[0], justBeforeNewReady)).toBe(1);
+
+    // Exactly at the new 3h boundary: reactivated again, on schedule.
+    const newReadyAt = secondTakenAt + 3 * 60 * 60 * 1000;
+    expect(isInCooldown(meds[0], newReadyAt)).toBe(false);
+  });
+});
+
 describe("getCooldownProgress", () => {
   const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
   const totalMs = 8 * 60 * 60 * 1000;
