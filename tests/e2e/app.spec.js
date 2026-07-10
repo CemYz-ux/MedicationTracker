@@ -434,6 +434,21 @@ test("shows a live countdown in '{remaining} of {total} remaining' format after 
   await expect(item).toHaveCSS("--progress", "100%");
 });
 
+test("pressing GO does not change the card's height, even though it reveals countdown text (MED-18)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const item = page.locator(".medication-item");
+  const heightBeforeGo = (await item.boundingBox()).height;
+
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+  await expect(page.getByText("8h of 8h remaining")).toBeVisible();
+
+  const heightAfterGo = (await item.boundingBox()).height;
+  expect(heightAfterGo).toBe(heightBeforeGo);
+});
+
 test("shows no fill or countdown text on an Active (non-cooldown) card", async ({ page }) => {
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
