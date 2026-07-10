@@ -1001,6 +1001,28 @@ test("saving an edit also returns focus to that row's Edit control, even though 
   await expect(page.getByRole("button", { name: "Edit Buffered Aspirin" })).toBeFocused();
 });
 
+test("saving an edit on the middle medication of several returns focus to that specific row's Edit button, not the first or last row's (MED-17 AC8)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+  await addMedicationViaUi(page, { name: "Paracetamol", dose: "500mg", interval: "4" });
+
+  await page.getByRole("button", { name: "Edit Ibuprofen" }).click();
+  const editDialog = page.getByRole("dialog", { name: "Edit medication" });
+  await editDialog.getByLabel("Name").fill("Middle Row Renamed");
+  await page.getByRole("button", { name: "Save changes" }).click();
+
+  await expect(editDialog).not.toBeVisible();
+  // Renaming the middle row makes the assertion unambiguous: if
+  // cooldownRefs ever mapped focus by list position instead of medication
+  // id, focus would land on whichever row is now second (Paracetamol,
+  // unchanged) rather than on the renamed medication itself.
+  await expect(page.getByRole("button", { name: "Edit Middle Row Renamed" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Edit Aspirin" })).not.toBeFocused();
+  await expect(page.getByRole("button", { name: "Edit Paracetamol" })).not.toBeFocused();
+});
+
 test("focus stays trapped inside the Edit modal while open (MED-17 AC9)", async ({ page }) => {
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
