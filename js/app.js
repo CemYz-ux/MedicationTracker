@@ -3,6 +3,7 @@ import {
   saveMedications,
   addMedication,
   updateMedicationInterval,
+  updateMedicationDetails,
   logDose,
   stopCooldown,
   isInCooldown,
@@ -30,7 +31,26 @@ const list = document.getElementById("medication-list");
 const emptyState = document.getElementById("empty-state");
 const statusAnnouncer = document.getElementById("status-announcer");
 
+// MED-17: the Edit modal. One dialog/form, reused for whichever row's Edit
+// control was activated — same reuse pattern as the Add dialog above, just
+// pre-filled per open() call instead of always starting blank.
+const editDialog = document.getElementById("edit-medication-dialog");
+const editForm = document.getElementById("edit-medication-form");
+const editNameInput = document.getElementById("med-edit-name");
+const editDoseInput = document.getElementById("med-edit-dose");
+const editErrorEl = document.getElementById("edit-form-error");
+const closeEditDialogBtn = document.getElementById("close-edit-dialog-btn");
+const cancelEditBtn = document.getElementById("cancel-edit-btn");
+
 let medications = loadMedications(window.localStorage);
+
+// The id of the medication currently open in the Edit dialog, `null` when
+// closed. Used both by the submit handler (which medication to update) and
+// the `close` handler (which row's Edit control focus should return to) —
+// looked up fresh from `cooldownRefs` rather than caching the button itself,
+// so a save's `render()` (which replaces every row's DOM nodes) can't leave
+// that reference dangling on a detached element.
+let editingMedicationId = null;
 
 // Per-medication references to the DOM nodes the periodic re-check needs to
 // touch (pill, GO button, countdown text, the card itself for its fill).
@@ -137,7 +157,27 @@ function renderMedicationItem(medication) {
   doseEl.className = "medication-dose";
   doseEl.textContent = medication.dose;
 
-  header.append(nameEl, " — ", doseEl);
+  // Grouped in their own element (rather than appended straight into
+  // `header`) so `header` has exactly two flex children — this group and the
+  // Edit button — and `justify-content: space-between` pushes just those two
+  // apart instead of spreading name/separator/dose/button all independently.
+  const titleGroup = document.createElement("span");
+  titleGroup.className = "medication-title";
+  titleGroup.append(nameEl, " — ", doseEl);
+
+  // MED-17: per-card Edit trigger — the first per-card secondary-action icon
+  // button in the app (no MED-12 delete control exists yet to sit alongside
+  // it). Accessible name identifies the medication, not just "Edit" (mirrors
+  // GO/Stop's own per-row aria-label discipline), and it's a plain <button>
+  // so it's keyboard-reachable/operable for free.
+  const editButton = document.createElement("button");
+  editButton.type = "button";
+  editButton.className = "icon-btn edit";
+  editButton.textContent = "✎";
+  editButton.setAttribute("aria-label", `Edit ${medication.name}`);
+  editButton.addEventListener("click", () => openEditDialog(medication));
+
+  header.append(titleGroup, editButton);
 
   const pill = document.createElement("span");
   pill.className = "pill";
@@ -240,7 +280,7 @@ function renderMedicationItem(medication) {
   countdownEl.className = "cooldown-countdown";
   countdownEl.hidden = true;
 
-  const refs = { item, pill, goButton, countdownEl, stopButton };
+  const refs = { item, pill, goButton, countdownEl, stopButton, editButton };
   cooldownRefs.set(medication.id, refs);
   updateCooldownDisplay(medication, refs);
 
@@ -373,6 +413,83 @@ form.addEventListener("submit", (event) => {
   } catch (error) {
     errorEl.textContent = error.message;
   }
+});
+
+// --- MED-17: edit a medication's Name and Dosage -----------------------
+
+function openEditDialog(medication) {
+  editingMedicationId = medication.id;
+  editErrorEl.textContent = "";
+  editNameInput.value = medication.name;
+  editDoseInput.value = medication.dose;
+  editDialog.showModal();
+}
+
+function closeEditDialog() {
+  if (editDialog.open) {
+    editDialog.close();
+  }
+}
+
+// Same single-close-handler discipline as the Add dialog: every close path
+// (close button, Cancel, Escape, backdrop click, or a successful save) ends
+// up here. Focus returns to the *specific* row's Edit button, not a generic
+// default — looked up fresh via `cooldownRefs` rather than a cached element
+// reference, since a successful save's `render()` (below) replaces every
+// row's DOM nodes before this handler runs (the native `close` event fires
+// asynchronously, after that synchronous `render()` call has already
+// repopulated `cooldownRefs` with the new nodes).
+editDialog.addEventListener("close", () => {
+  editForm.reset();
+  editErrorEl.textContent = "";
+  const refs = cooldownRefs.get(editingMedicationId);
+  if (refs) {
+    refs.editButton.focus();
+  }
+  editingMedicationId = null;
+});
+
+// <dialog> does not close on backdrop click by default; a click that lands
+// directly on the dialog element itself (not its content) is a backdrop click.
+editDialog.addEventListener("click", (event) => {
+  if (event.target === editDialog) {
+    closeEditDialog();
+  }
+});
+
+closeEditDialogBtn.addEventListener("click", closeEditDialog);
+cancelEditBtn.addEventListener("click", closeEditDialog);
+
+editForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  editErrorEl.textContent = "";
+
+  // Validation and persistence are deliberately two separate try/catches
+  // (unlike Add/GO/Stop, where only the storage write can throw): Name/Dose
+  // validation failures need the Add-modal-style inline field error, while a
+  // storage failure needs the GO/Stop-style "try again" message — one catch
+  // block can't produce both distinct messages.
+  let updated;
+  try {
+    updated = updateMedicationDetails(medications, editingMedicationId, {
+      name: editNameInput.value,
+      dose: editDoseInput.value,
+    });
+  } catch (error) {
+    editErrorEl.textContent = error.message;
+    return;
+  }
+
+  try {
+    saveMedications(updated, window.localStorage);
+  } catch {
+    editErrorEl.textContent = "Could not save changes — please try again.";
+    return;
+  }
+
+  medications = updated;
+  render();
+  closeEditDialog();
 });
 
 render();

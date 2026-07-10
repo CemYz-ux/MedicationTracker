@@ -18,7 +18,7 @@ Living source of truth for what the site does. Update this file with every featu
 **Status:** Implemented
 **Flow:**
 1. On page load, previously logged medications are read from `localStorage` and rendered in a list.
-2. Each row shows the medication's name, dose, a status pill, live cooldown countdown text (cooldown-only — see "Cooldown countdown and fill"), an editable Interval (hours) input, and a GO button (see "Log a dose (press GO)" below) — no delete control yet; that belongs to a later story.
+2. Each row shows the medication's name, dose, a small Edit (pencil-icon) control (see "Edit a medication's Name and Dosage" below), a status pill, live cooldown countdown text (cooldown-only — see "Cooldown countdown and fill"), an editable Interval (hours) input, and a GO button (see "Log a dose (press GO)" below) — no delete control yet; that belongs to a later story.
 3. The status pill is a green "Active" pill when GO is enabled, or an amber "Cooldown" pill when GO is disabled. It reflects the same time-based cooldown check the GO button and countdown text use — no separate logic of its own.
 4. If there are no medications (including corrupted/missing stored data), an empty-state message ("No medications yet — add one to get started.") is shown instead of the list.
 5. Records left over from the old prototype schema (`{id, name, dose, time}`, no `intervalHours`) are silently discarded on load rather than shown or migrated.
@@ -32,6 +32,20 @@ Living source of truth for what the site does. Update this file with every featu
 4. A screen-reader-only status message ("{medication name} logged.") is announced via a page-level `aria-live="polite"` region when a dose is successfully logged.
 5. If saving fails (e.g. storage full/unavailable), an inline error ("Could not log dose — please try again.") is shown next to that row, the GO button stays enabled, and nothing is written to storage — the UI never implies a dose was logged when it wasn't persisted.
 6. Logging one medication's dose does not affect any other medication's GO button, timestamp, or interval.
+
+## Edit a medication's Name and Dosage
+**Status:** Implemented
+**Flow:**
+1. Every medication card (Active or Cooldown) shows a small pencil-icon "Edit" control in its header, labeled for assistive tech as "Edit {medication name}" and reachable/operable via keyboard alone (Tab to focus, Enter/Space to activate) — the first per-card secondary-action icon button in the app; there is no delete ("x") control yet to sit alongside it.
+2. Activating a card's Edit control opens a modal dialog (native `<dialog>` + `showModal()`) containing only Name and Dose fields, pre-filled with that specific medication's current saved values — never blank, and never another medication's values. This is a separate dialog element from the Add-medication modal (mirrors its markup/CSS classes and interaction pattern, but is not a shared/mode-toggling dialog), and it deliberately has no Interval field — Interval remains editable exclusively via its own existing inline per-card control (see "Edit a medication's interval" below).
+3. User changes Name and/or Dose and submits.
+4. If Name or Dose is empty, an inline error message is shown inside the modal (`role="alert"`), the modal stays open, and nothing is saved — mirroring the Add-medication modal's own empty-field validation.
+5. On a valid submit, only that medication's `name` and `dose` are updated (trimmed) — `intervalHours`, `lastTakenAt`, and the cooldown interval snapshot are all left completely untouched, so editing Name/Dose never disturbs a running cooldown's countdown, status, or card fill (the same discipline "Edit a medication's interval" below already applies to Interval edits). An Active medication stays Active; editing never starts a cooldown. The change is saved to `localStorage` immediately, the modal closes, and the card reflects the new values right away.
+6. If saving fails (e.g. storage full/unavailable), an inline error ("Could not save changes — please try again.") is shown inside the modal, the modal stays open, and the card keeps showing the pre-edit values — the UI never implies a change was saved when it wasn't persisted.
+7. The modal can be closed at any time — via its close control, the Cancel button, pressing Escape, or clicking the backdrop — without saving. Every close path discards unsaved input and returns keyboard focus to the *specific* card's Edit control that opened it (not a generic default), including after a successful save, even though saving re-renders the entire list.
+8. While the modal is open, Tab-based keyboard focus is contained inside it and cannot reach the page behind it (native `<dialog>` modal behavior, same mechanism the Add-medication modal relies on).
+9. The edited Name/Dose persist across a page reload.
+10. Editing one medication's Name/Dose never affects any other medication's data (name, dose, interval, cooldown state) or display.
 
 ## Edit a medication's interval
 **Status:** Implemented

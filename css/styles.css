@@ -171,7 +171,9 @@ button:hover {
   background: #255a43;
 }
 
-dialog#add-medication-dialog {
+/* Shared by every app dialog (Add — MED-5, Edit — MED-17): each is its own
+   separate <dialog> element, but they look and behave consistently. */
+.app-dialog {
   width: min(28rem, calc(100vw - 2rem));
   border: none;
   border-radius: 14px;
@@ -181,7 +183,7 @@ dialog#add-medication-dialog {
   box-shadow: 0 24px 60px -16px rgba(23, 34, 42, 0.4);
 }
 
-dialog#add-medication-dialog::backdrop {
+.app-dialog::backdrop {
   background: rgba(23, 34, 42, 0.45);
 }
 
@@ -273,7 +275,35 @@ dialog#add-medication-dialog::backdrop {
 }
 
 .medication-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   font-size: 1.05rem;
+}
+
+/* Small icon-button convention for per-card secondary actions in the header
+   (first one: Edit, MED-17). Deliberately neutral at rest, like the dialog's
+   own close control; a future delete control (MED-12) can reuse `.icon-btn`
+   and layer its own hover color the way `.icon-btn.edit` does below, rather
+   than sharing this one (edit isn't a destructive action, so it shouldn't
+   hover to `--danger` the way a delete control likely should). */
+.icon-btn {
+  background: transparent;
+  color: var(--ink-soft);
+  padding: 0.3rem 0.55rem;
+  font-size: 1rem;
+  line-height: 1;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.icon-btn:hover {
+  background: var(--panel);
+}
+
+.icon-btn.edit:hover {
+  color: var(--go);
 }
 
 .medication-name {

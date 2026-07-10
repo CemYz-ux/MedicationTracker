@@ -4,9 +4,11 @@ import {
   saveMedications,
   addMedication,
   updateMedicationInterval,
+  updateMedicationDetails,
   removeMedication,
   validateMedication,
   validateInterval,
+  validateNameAndDose,
   logDose,
   stopCooldown,
   isInCooldown,
@@ -117,6 +119,25 @@ describe("validateInterval", () => {
   it("accepts a positive decimal value", () => {
     expect(validateInterval(4.5)).toBeNull();
     expect(validateInterval("4.5")).toBeNull();
+  });
+});
+
+describe("validateNameAndDose", () => {
+  it("requires both name and dose", () => {
+    expect(validateNameAndDose({ name: "", dose: "" })).toEqual([
+      "Name is required.",
+      "Dose is required.",
+    ]);
+  });
+
+  it("rejects whitespace-only fields", () => {
+    expect(validateNameAndDose({ name: "  ", dose: "100mg" })).toEqual([
+      "Name is required.",
+    ]);
+  });
+
+  it("passes for fully filled name and dose", () => {
+    expect(validateNameAndDose({ name: "Aspirin", dose: "100mg" })).toEqual([]);
   });
 });
 
@@ -251,6 +272,120 @@ describe("updateMedicationInterval", () => {
     const meds = [{ id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null }];
     updateMedicationInterval(meds, "1", 4);
     expect(meds[0].intervalHours).toBe(8);
+  });
+});
+
+describe("updateMedicationDetails (MED-17)", () => {
+  it("updates only the name and dose of the matching medication (MED-17 AC5)", () => {
+    const meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+    ];
+    const result = updateMedicationDetails(meds, "1", { name: "Ibuprofen", dose: "200mg" });
+    expect(result[0]).toMatchObject({ name: "Ibuprofen", dose: "200mg" });
+  });
+
+  it("trims whitespace from name and dose", () => {
+    const meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+    ];
+    const result = updateMedicationDetails(meds, "1", { name: " Ibuprofen ", dose: " 200mg " });
+    expect(result[0]).toMatchObject({ name: "Ibuprofen", dose: "200mg" });
+  });
+
+  it(
+    "preserves lastTakenAt, cooldownIntervalHours, and intervalHours untouched — editing " +
+      "Name/Dose never disturbs a running cooldown (MED-17's central invariant, mirrors " +
+      "updateMedicationInterval's AC 11-13 invariant)",
+    () => {
+      const meds = [
+        {
+          id: "1",
+          name: "Aspirin",
+          dose: "100mg",
+          intervalHours: 8,
+          cooldownIntervalHours: 8,
+          lastTakenAt: "2026-07-08T10:00:00.000Z",
+        },
+      ];
+      const result = updateMedicationDetails(meds, "1", { name: "Ibuprofen", dose: "200mg" });
+      expect(result[0]).toEqual({
+        id: "1",
+        name: "Ibuprofen",
+        dose: "200mg",
+        intervalHours: 8,
+        cooldownIntervalHours: 8,
+        lastTakenAt: "2026-07-08T10:00:00.000Z",
+      });
+    }
+  );
+
+  it("does not disturb isInCooldown/remaining time/progress for a medication mid-cooldown", () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const meds = [
+      {
+        id: "1",
+        name: "Aspirin",
+        dose: "100mg",
+        intervalHours: 8,
+        cooldownIntervalHours: 8,
+        lastTakenAt: new Date(takenAt).toISOString(),
+      },
+    ];
+    const now = takenAt + 3 * 60 * 60 * 1000;
+    const before = {
+      inCooldown: isInCooldown(meds[0], now),
+      remaining: getCooldownRemainingMs(meds[0], now),
+      progress: getCooldownProgress(meds[0], now),
+    };
+
+    const result = updateMedicationDetails(meds, "1", { name: "Ibuprofen", dose: "200mg" });
+
+    expect(isInCooldown(result[0], now)).toBe(before.inCooldown);
+    expect(getCooldownRemainingMs(result[0], now)).toBe(before.remaining);
+    expect(getCooldownProgress(result[0], now)).toBe(before.progress);
+  });
+
+  it("leaves an Active (never-logged) medication Active — editing does not start a cooldown", () => {
+    const meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+    ];
+    const result = updateMedicationDetails(meds, "1", { name: "Ibuprofen", dose: "200mg" });
+    expect(result[0].lastTakenAt).toBeNull();
+    expect(isInCooldown(result[0])).toBe(false);
+  });
+
+  it("does not affect other medications in the list (MED-17 AC13)", () => {
+    const meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+      { id: "2", name: "Ibuprofen", dose: "200mg", intervalHours: 6, lastTakenAt: null },
+    ];
+    const result = updateMedicationDetails(meds, "1", { name: "Paracetamol", dose: "500mg" });
+    expect(result[1]).toEqual(meds[1]);
+  });
+
+  it("throws when name or dose is empty and does not mutate the list", () => {
+    const meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+    ];
+    expect(() => updateMedicationDetails(meds, "1", { name: "", dose: "" })).toThrow(
+      "Name is required. Dose is required."
+    );
+    expect(meds[0]).toMatchObject({ name: "Aspirin", dose: "100mg" });
+  });
+
+  it("does not mutate the original list on a successful update", () => {
+    const meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+    ];
+    updateMedicationDetails(meds, "1", { name: "Ibuprofen", dose: "200mg" });
+    expect(meds[0]).toMatchObject({ name: "Aspirin", dose: "100mg" });
+  });
+
+  it("returns an equivalent list when the id is not found", () => {
+    const meds = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+    ];
+    expect(updateMedicationDetails(meds, "nope", { name: "X", dose: "1mg" })).toEqual(meds);
   });
 });
 
