@@ -370,6 +370,51 @@ describe("isInCooldown", () => {
   });
 });
 
+describe("cooldown math at large elapsed magnitudes (MED-10 AC3)", () => {
+  // Locks in that the decision is a plain `now >= readyAt` comparison with
+  // no overflow, clamping, or special-casing as elapsed time grows — not
+  // just correct for the small (seconds/minutes) magnitudes exercised
+  // elsewhere, but also many days past the ready time.
+  const takenAt = new Date("2026-07-01T00:00:00.000Z").getTime();
+  const med = {
+    id: "1",
+    name: "Aspirin",
+    dose: "100mg",
+    intervalHours: 1,
+    cooldownIntervalHours: 1,
+    lastTakenAt: new Date(takenAt).toISOString(),
+  };
+  const readyAt = takenAt + 60 * 60 * 1000;
+  const thirtyDaysPastReady = readyAt + 30 * 24 * 60 * 60 * 1000;
+
+  it("is false many days past the ready time", () => {
+    expect(isInCooldown(med, thirtyDaysPastReady)).toBe(false);
+  });
+
+  it("has zero remaining time many days past the ready time", () => {
+    expect(getCooldownRemainingMs(med, thirtyDaysPastReady)).toBe(0);
+  });
+
+  it("has zero progress many days past the ready time", () => {
+    expect(getCooldownProgress(med, thirtyDaysPastReady)).toBe(0);
+  });
+});
+
+describe("isInCooldown corrupted lastTakenAt guard (MED-10 AC4)", () => {
+  it("treats an unparseable lastTakenAt as not-in-cooldown (Active), without throwing", () => {
+    const med = {
+      id: "1",
+      name: "Aspirin",
+      dose: "100mg",
+      intervalHours: 8,
+      cooldownIntervalHours: 8,
+      lastTakenAt: "not-a-valid-date",
+    };
+    expect(() => isInCooldown(med, Date.now())).not.toThrow();
+    expect(isInCooldown(med, Date.now())).toBe(false);
+  });
+});
+
 describe("cooldown interval snapshot freezes against an edit (MED-5/MED-8 invariant)", () => {
   it("computes remaining time against the interval active at logDose time, not a later edit", () => {
     let meds = [
