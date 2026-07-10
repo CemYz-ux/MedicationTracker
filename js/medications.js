@@ -182,13 +182,17 @@ export function isInCooldown(medication, now = Date.now()) {
  * alongside it are both cleared back to `null` — their pre-GO shape.
  * `isInCooldown` treats a falsy `lastTakenAt` as never-logged and returns
  * `false` immediately (see its own doc comment), so that alone is enough to
- * make every other cooldown-derived value (countdown text, fill, GO's
- * enabled state) come back exactly as they would for a medication that
- * reached Active by natural elapse (MED-9). There is deliberately no
- * separate "stopped" flag: MED-11's AC requires Stop's result to be
- * indistinguishable from natural elapse, and this app's architecture is
- * "derive status fresh from stored data every time," not "track a status
- * flag" (confirmed working correctly across MED-8/9/10).
+ * make every other cooldown-derived *display* value (countdown text, fill,
+ * GO's enabled state) come back exactly as they would for a medication that
+ * reached Active by natural elapse (MED-9) — the raw stored shape is not
+ * identical, since natural elapse leaves the original `cooldownIntervalHours`
+ * snapshot in place while Stop nulls it out; nothing today reads that field
+ * for an Active medication, so the difference is inert, but a future reader
+ * shouldn't assume the two paths produce identical stored data. There is
+ * deliberately no separate "stopped" flag: MED-11's AC requires Stop's
+ * *derived* result to be indistinguishable from natural elapse, and this
+ * app's architecture is "derive status fresh from stored data every time,"
+ * not "track a status flag" (confirmed working correctly across MED-8/9/10).
  *
  * A later GO press re-populates both fields from scratch using whatever
  * `intervalHours` is set at that later moment (see `logDose`) — Stop never
