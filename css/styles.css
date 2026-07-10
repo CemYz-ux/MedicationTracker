@@ -246,10 +246,15 @@ button:hover {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.5rem;
-  padding: 1.1rem 1.2rem;
+  /* Extra bottom padding permanently reserves room for the bottom-right
+     countdown badge (see `.cooldown-countdown` below) so switching between
+     Active and Cooldown never changes the card's height (MED-18) — the
+     space is reserved at all times, not just while the badge is shown. */
+  padding: 1.1rem 1.2rem 2.5rem;
   border: 1px solid var(--rule);
   border-radius: 10px;
   background: #fff;
+  position: relative;
   transition: background 0.2s ease, border-color 0.2s ease, --progress 0.2s ease;
 }
 
@@ -349,13 +354,22 @@ button:hover {
 }
 
 /* Live countdown text on a cooldown card, e.g. "3h 12m of 5h remaining" —
-   supplementary to the card's `--progress` fill, never a substitute for it. */
+   supplementary to the card's `--progress` fill, never a substitute for it.
+   MED-18: pinned to the card's bottom-right corner (out of normal flow) so
+   showing/hiding it on GO press never grows or shrinks the card — the
+   reserved padding-bottom on `.medication-item` above is what actually
+   guarantees the constant card height; this positioning just places the
+   text within that reserved space. */
 .cooldown-countdown {
+  position: absolute;
+  right: 1.2rem;
+  bottom: 0.9rem;
   margin: 0;
   font-family: var(--font-sans);
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--wait);
+  text-align: right;
 }
 
 .interval-field {
@@ -380,6 +394,15 @@ button:hover {
 
 .row-error {
   margin: 0;
+}
+
+/* Matches `.btn.stop`'s 1px border with a transparent one of the same
+   width, so GO and Stop are the same box height. Without this, `.actions`
+   (and therefore the whole card) grew by the border's 2px whenever Stop
+   appeared alongside GO on cooldown entry — a second, more subtle source of
+   the same GO-press reflow MED-18 exists to eliminate. */
+.go-btn {
+  border: 1px solid transparent;
 }
 
 /* Houses the GO and Stop buttons side by side (MED-11 adds Stop); Stop is
