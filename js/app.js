@@ -4,6 +4,7 @@ import {
   addMedication,
   updateMedicationInterval,
   logDose,
+  stopCooldown,
   isInCooldown,
   getCooldownProgress,
   formatCountdown,
@@ -81,11 +82,16 @@ function setCardStatus(item, pill, inCooldown) {
 // from the periodic tick (so it stays current without a reload). Never
 // touches any other medication's row, keeping refresh cycles independent.
 function updateCooldownDisplay(medication, refs, now = Date.now()) {
-  const { item, pill, goButton, countdownEl } = refs;
+  const { item, pill, goButton, countdownEl, stopButton } = refs;
   const inCooldown = isInCooldown(medication, now);
 
   setGoButtonDisabled(goButton, inCooldown);
   setCardStatus(item, pill, inCooldown);
+  // Stop only makes sense while there's a cooldown to cancel (MED-11 AC1) —
+  // hidden entirely rather than merely disabled, since "no Stop control is
+  // shown" is the literal AC wording (unlike GO, which stays visible but
+  // aria-disabled so it never loses keyboard focus while in cooldown).
+  stopButton.hidden = !inCooldown;
 
   if (inCooldown) {
     countdownEl.textContent = formatCountdown(medication, now);
@@ -209,6 +215,24 @@ function renderMedicationItem(medication) {
   goError.className = "form-error row-error go-error";
   goError.setAttribute("role", "alert");
 
+  // Pressing Stop cancels an in-progress cooldown immediately and returns
+  // the medication to Active (MED-11) — visible only while in cooldown
+  // (toggled in `updateCooldownDisplay`), since there's nothing to stop
+  // otherwise (AC1).
+  const stopButton = document.createElement("button");
+  stopButton.type = "button";
+  stopButton.className = "btn stop";
+  stopButton.id = `stop-${medication.id}`;
+  stopButton.textContent = "Stop";
+  // Same reasoning as GO's aria-label: a unique accessible name per row
+  // (via the medication's name) so Playwright/screen readers can address
+  // one specific medication's Stop control among several in the list.
+  stopButton.setAttribute("aria-label", `Stop — cancel ${medication.name} cooldown`);
+
+  const stopError = document.createElement("p");
+  stopError.className = "form-error row-error stop-error";
+  stopError.setAttribute("role", "alert");
+
   // Live countdown text, e.g. "3h 12m of 5h remaining" — supplementary to
   // the card's fill, never a substitute for it. Hidden entirely outside of
   // cooldown (see `updateCooldownDisplay`).
@@ -216,7 +240,7 @@ function renderMedicationItem(medication) {
   countdownEl.className = "cooldown-countdown";
   countdownEl.hidden = true;
 
-  const refs = { item, pill, goButton, countdownEl };
+  const refs = { item, pill, goButton, countdownEl, stopButton };
   cooldownRefs.set(medication.id, refs);
   updateCooldownDisplay(medication, refs);
 
@@ -260,7 +284,43 @@ function renderMedicationItem(medication) {
     }
   });
 
-  item.append(header, pill, countdownEl, intervalField, rowError, goButton, goError);
+  stopButton.addEventListener("click", () => {
+    // Same double-guard discipline as GO: Stop is hidden outside of
+    // cooldown (see `updateCooldownDisplay`), but a forced/stale invocation
+    // is still re-checked against freshly-derived state here rather than
+    // trusting the DOM alone.
+    const current = medications.find((entry) => entry.id === medication.id);
+    if (!current || !isInCooldown(current)) {
+      return;
+    }
+
+    try {
+      const updated = stopCooldown(medications, medication.id);
+      // Same storage-failure discipline as GO: if the write throws, this
+      // throws before `medications` or any displayed state changes — the UI
+      // must not imply the cooldown was cancelled when it wasn't persisted
+      // (MED-11 AC5).
+      saveMedications(updated, window.localStorage);
+      medications = updated;
+      stopError.textContent = "";
+      const justStopped = medications.find((entry) => entry.id === medication.id);
+      updateCooldownDisplay(justStopped, refs);
+      // Stop just hid itself and GO just became enabled (MED-11 AC2/AC3) —
+      // move focus there explicitly rather than leaving it on a control
+      // that no longer exists in the accessibility tree, mirroring GO's own
+      // explicit `.focus()` discipline above.
+      goButton.focus();
+      statusAnnouncer.textContent = `${medication.name} cooldown stopped.`;
+    } catch {
+      stopError.textContent = "Could not stop cooldown — please try again.";
+    }
+  });
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  actions.append(goButton, stopButton);
+
+  item.append(header, pill, countdownEl, intervalField, rowError, actions, goError, stopError);
   return item;
 }
 

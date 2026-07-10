@@ -639,3 +639,171 @@ test("a medication whose cooldown fully elapsed while the tab was closed shows A
   await expect(page.getByRole("button", { name: "GO — log Aspirin taken" })).toBeEnabled();
   await expect(item.locator(".cooldown-countdown")).toBeHidden();
 });
+
+// --- MED-11: stop cooldown early -------------------------------------------
+
+test("shows no Stop control on an Active medication (MED-11 AC1)", async ({ page }) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  await expect(page.locator(".medication-item")).toHaveClass(/active/);
+  await expect(
+    page.getByRole("button", { name: "Stop — cancel Aspirin cooldown" })
+  ).toBeHidden();
+});
+
+test("pressing Stop cancels the cooldown immediately, without waiting for the remaining time to elapse (MED-11 AC2)", async ({
+  page,
+}) => {
+  await page.clock.install();
+  await page.reload();
+
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/cooldown/);
+
+  // Only a sliver of the 8h interval has passed — a large amount of
+  // cooldown time is deliberately still remaining when Stop is pressed, so
+  // an immediate cancellation (not a coincidental natural elapse) is what's
+  // being proven here.
+  await page.clock.fastForward(5 * 60 * 1000);
+  await expect(page.getByText(/of 8h remaining/)).toBeVisible();
+
+  await page.getByRole("button", { name: "Stop — cancel Aspirin cooldown" }).click();
+
+  await expect(item).toHaveClass(/active/);
+  await expect(item).not.toHaveClass(/cooldown/);
+  await expect(page.getByRole("button", { name: "GO — log Aspirin taken" })).toBeEnabled();
+  await expect(item.locator(".cooldown-countdown")).toBeHidden();
+});
+
+test("Stop's resulting state is indistinguishable from one that reached Active by natural elapse (MED-11 AC3)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/cooldown/);
+
+  await page.getByRole("button", { name: "Stop — cancel Aspirin cooldown" }).click();
+
+  // Same assertions the natural-elapse cases (MED-9/MED-10) make on an
+  // Active row — there is no separate "stopped" visual state.
+  await expect(item).toHaveClass(/active/);
+  await expect(item).not.toHaveClass(/cooldown/);
+  await expect(page.getByRole("button", { name: "GO — log Aspirin taken" })).toBeEnabled();
+  await expect(item.locator(".cooldown-countdown")).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: "Stop — cancel Aspirin cooldown" })
+  ).toBeHidden();
+
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("medications"))
+  );
+  expect(stored[0].lastTakenAt).toBeNull();
+});
+
+test("Stop, then editing the Interval, then pressing GO starts a fresh cooldown using the new interval (MED-11 AC4)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+  await page.getByRole("button", { name: "Stop — cancel Aspirin cooldown" }).click();
+
+  const intervalInput = page.getByLabel("Interval (hours)").last();
+  await intervalInput.fill("3");
+  await intervalInput.blur();
+
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+
+  // A fresh 3h cooldown, not a resumption or reflection of the original 8h
+  // interval that was in effect before Stop was pressed.
+  await expect(page.getByText("3h of 3h remaining")).toBeVisible();
+  await expect(page.locator(".medication-item")).toHaveClass(/cooldown/);
+});
+
+test("shows an inline error and leaves the cooldown running when the Stop write to localStorage fails (MED-11 AC5)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+
+  // Simulate a storage failure for writes made after this point, without
+  // touching the add-medication/GO flow that already succeeded above.
+  await page.evaluate(() => {
+    window.localStorage.setItem = () => {
+      throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+    };
+  });
+
+  const stopButton = page.getByRole("button", { name: "Stop — cancel Aspirin cooldown" });
+  await stopButton.click();
+
+  await expect(page.getByRole("alert").last()).toHaveText(
+    "Could not stop cooldown — please try again."
+  );
+  // The displayed state must not imply the cooldown was cancelled: the row
+  // stays greyed out, GO stays disabled, and Stop is still there to retry.
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/cooldown/);
+  await expect(page.getByRole("button", { name: "GO — log Aspirin taken" })).toBeDisabled();
+  await expect(stopButton).toBeVisible();
+});
+
+test("pressing Stop on one medication does not affect another medication's cooldown", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+  await page.getByRole("button", { name: "GO — log Ibuprofen taken" }).click();
+
+  await page.getByRole("button", { name: "Stop — cancel Aspirin cooldown" }).click();
+
+  await expect(page.getByRole("button", { name: "GO — log Aspirin taken" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "GO — log Ibuprofen taken" })).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Stop — cancel Ibuprofen cooldown" })
+  ).toBeVisible();
+
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("medications"))
+  );
+  const aspirin = stored.find((medication) => medication.name === "Aspirin");
+  const ibuprofen = stored.find((medication) => medication.name === "Ibuprofen");
+  expect(aspirin.lastTakenAt).toBeNull();
+  expect(ibuprofen.lastTakenAt).not.toBeNull();
+});
+
+test("pressing Stop moves focus to the now-enabled GO button, not somewhere unrelated", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
+  const stopButton = page.getByRole("button", { name: "Stop — cancel Aspirin cooldown" });
+  const addTrigger = page.getByRole("button", { name: "+ Add medication" });
+
+  // The add-medication flow itself returns focus to addTrigger once the
+  // dialog finishes closing; wait for that settle before driving our own
+  // keyboard/focus assertions, so this test isn't racing it on a slower CI
+  // runner (the same flake root cause seen on MED-7/MED-8).
+  await expect(addTrigger).toBeFocused();
+
+  await goButton.click();
+  await expect(stopButton).toBeVisible();
+
+  await stopButton.focus();
+  await expect(stopButton).toBeFocused();
+  await page.keyboard.press("Enter");
+
+  await expect(goButton).toBeEnabled();
+  // Regression guard mirroring the equivalent GO test: cancelling and
+  // hiding the control that held focus must not silently drop focus to the
+  // unrelated "+ Add medication" trigger.
+  await expect(addTrigger).not.toBeFocused();
+  await expect(goButton).toBeFocused();
+});

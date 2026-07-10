@@ -127,8 +127,10 @@ button:hover {
   background: #255a43;
 }
 
-/* Not used yet (Stop is MED-11 scope) — kept so a `.btn.stop` variant can be
-   dropped onto a button later without restructuring the button system. */
+/* Stop button variant (MED-11): visually distinct from the primary GO
+   action (outline, not filled) since it's a corrective/cancel action, not
+   the primary one. Only ever shown on a row while it is in cooldown — see
+   `stopButton.hidden` in app.js. */
 .btn.stop {
   background: #fff;
   color: var(--wait);
@@ -350,8 +352,12 @@ dialog#add-medication-dialog::backdrop {
   margin: 0;
 }
 
-.go-btn {
-  align-self: flex-start;
+/* Houses the GO and Stop buttons side by side (MED-11 adds Stop); Stop is
+   hidden outside of cooldown, so this collapses back to just GO otherwise. */
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .go-btn:disabled,
