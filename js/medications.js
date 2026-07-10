@@ -45,10 +45,20 @@ export function saveMedications(medications, storage) {
   storage.setItem(STORAGE_KEY, JSON.stringify(medications));
 }
 
-export function validateMedication({ name, dose, intervalHours }) {
+/**
+ * Validates just the Name and Dose fields, shared by `validateMedication`
+ * (Add, which also validates Interval) and `updateMedicationDetails` (Edit,
+ * MED-17, which never touches Interval — see that function's doc comment).
+ */
+export function validateNameAndDose({ name, dose }) {
   const errors = [];
   if (!name || !name.trim()) errors.push("Name is required.");
   if (!dose || !dose.trim()) errors.push("Dose is required.");
+  return errors;
+}
+
+export function validateMedication({ name, dose, intervalHours }) {
+  const errors = validateNameAndDose({ name, dose });
   const intervalError = validateInterval(intervalHours);
   if (intervalError) errors.push(intervalError);
   return errors;
@@ -100,6 +110,34 @@ export function updateMedicationInterval(medications, id, newIntervalHours) {
 
 export function removeMedication(medications, id) {
   return medications.filter((medication) => medication.id !== id);
+}
+
+/**
+ * Returns a new list where the medication matching `id` has its `name` and
+ * `dose` replaced (trimmed, like `addMedication`). Every other field —
+ * `intervalHours`, `lastTakenAt`, and `cooldownIntervalHours` — is preserved
+ * untouched, so editing Name/Dose never disturbs a running cooldown or its
+ * countdown/fill (MED-17's central invariant, the same discipline
+ * `updateMedicationInterval` already applies to the Interval field). This
+ * function deliberately has no `intervalHours` parameter at all — MED-17's
+ * Edit modal does not include Interval, which stays exclusively owned by its
+ * own inline per-card control (MED-5).
+ *
+ * Throws a human-readable error (joined, like `addMedication`) when Name or
+ * Dose is empty; the caller should retain the previously saved values in
+ * that case. A no-op (returns an equivalent list) if `id` doesn't match any
+ * medication, mirroring `removeMedication`/`updateMedicationInterval`.
+ */
+export function updateMedicationDetails(medications, id, { name, dose }) {
+  const errors = validateNameAndDose({ name, dose });
+  if (errors.length > 0) {
+    throw new Error(errors.join(" "));
+  }
+  return medications.map((medication) =>
+    medication.id === id
+      ? { ...medication, name: name.trim(), dose: dose.trim() }
+      : medication
+  );
 }
 
 /**
