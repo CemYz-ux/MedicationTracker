@@ -177,6 +177,43 @@ export function isInCooldown(medication, now = Date.now()) {
 }
 
 /**
+ * Returns a new list where the medication matching `id` has its cooldown
+ * cancelled early: `lastTakenAt` and the interval snapshot `logDose` took
+ * alongside it are both cleared back to `null` — their pre-GO shape.
+ * `isInCooldown` treats a falsy `lastTakenAt` as never-logged and returns
+ * `false` immediately (see its own doc comment), so that alone is enough to
+ * make every other cooldown-derived value (countdown text, fill, GO's
+ * enabled state) come back exactly as they would for a medication that
+ * reached Active by natural elapse (MED-9). There is deliberately no
+ * separate "stopped" flag: MED-11's AC requires Stop's result to be
+ * indistinguishable from natural elapse, and this app's architecture is
+ * "derive status fresh from stored data every time," not "track a status
+ * flag" (confirmed working correctly across MED-8/9/10).
+ *
+ * A later GO press re-populates both fields from scratch using whatever
+ * `intervalHours` is set at that later moment (see `logDose`) — Stop never
+ * touches `intervalHours` itself, so an edit made after Stop and before the
+ * next GO press governs the next cooldown, not whatever was in effect
+ * before Stop was pressed (MED-11 AC4).
+ *
+ * A no-op (returns an equivalent list) if `id` doesn't match any
+ * medication, or if the medication is not currently in cooldown — mirrors
+ * `removeMedication`'s not-found behavior, and guards a Stop control that's
+ * momentarily stale (e.g. the medication reactivated on its own an instant
+ * before the click was processed).
+ *
+ * `now` (epoch millis) is injectable for deterministic tests; it defaults
+ * to `Date.now()`.
+ */
+export function stopCooldown(medications, id, now = Date.now()) {
+  return medications.map((medication) =>
+    medication.id === id && isInCooldown(medication, now)
+      ? { ...medication, lastTakenAt: null, cooldownIntervalHours: null }
+      : medication
+  );
+}
+
+/**
  * Milliseconds remaining until `medication`'s cooldown ends, clamped to 0
  * once it has elapsed (or if it was never logged).
  */

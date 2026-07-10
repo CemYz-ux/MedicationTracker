@@ -8,6 +8,7 @@ import {
   validateMedication,
   validateInterval,
   logDose,
+  stopCooldown,
   isInCooldown,
   getCooldownRemainingMs,
   getCooldownTotalMs,
@@ -334,6 +335,151 @@ describe("logDose", () => {
     ];
     const result = logDose(meds, "1", Date.now());
     expect(result[0].cooldownIntervalHours).toBe(8);
+  });
+});
+
+describe("stopCooldown (MED-11)", () => {
+  it("cancels an active cooldown by clearing lastTakenAt and the interval snapshot (MED-11 AC2)", () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const meds = [
+      {
+        id: "1",
+        name: "Aspirin",
+        dose: "100mg",
+        intervalHours: 8,
+        cooldownIntervalHours: 8,
+        lastTakenAt: new Date(takenAt).toISOString(),
+      },
+    ];
+    const oneHourIn = takenAt + 60 * 60 * 1000;
+    expect(isInCooldown(meds[0], oneHourIn)).toBe(true);
+
+    const result = stopCooldown(meds, "1", oneHourIn);
+
+    expect(result[0].lastTakenAt).toBeNull();
+    expect(result[0].cooldownIntervalHours).toBeNull();
+    expect(isInCooldown(result[0], oneHourIn)).toBe(false);
+  });
+
+  it("the resulting state is indistinguishable from a medication that reached Active by natural elapse (MED-11 AC3)", () => {
+    const now = new Date("2026-07-09T00:00:00.000Z").getTime();
+
+    const naturallyElapsed = {
+      id: "1",
+      name: "Aspirin",
+      dose: "100mg",
+      intervalHours: 8,
+      cooldownIntervalHours: 8,
+      lastTakenAt: new Date(now - 9 * 60 * 60 * 1000).toISOString(),
+    };
+    const [stopped] = stopCooldown(
+      [
+        {
+          id: "2",
+          name: "Aspirin",
+          dose: "100mg",
+          intervalHours: 8,
+          cooldownIntervalHours: 8,
+          lastTakenAt: new Date(now).toISOString(),
+        },
+      ],
+      "2",
+      now
+    );
+
+    expect(isInCooldown(stopped, now)).toBe(isInCooldown(naturallyElapsed, now));
+    expect(getCooldownRemainingMs(stopped, now)).toBe(
+      getCooldownRemainingMs(naturallyElapsed, now)
+    );
+    expect(getCooldownProgress(stopped, now)).toBe(getCooldownProgress(naturallyElapsed, now));
+    expect(formatCountdown(stopped, now)).toBe(formatCountdown(naturallyElapsed, now));
+  });
+
+  it("is a no-op when the medication is not currently in cooldown (MED-11 AC1 guard)", () => {
+    const active = [
+      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null },
+    ];
+    expect(stopCooldown(active, "1")).toEqual(active);
+  });
+
+  it("is a no-op when the id does not match any medication", () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const meds = [
+      {
+        id: "1",
+        name: "Aspirin",
+        dose: "100mg",
+        intervalHours: 8,
+        cooldownIntervalHours: 8,
+        lastTakenAt: new Date(takenAt).toISOString(),
+      },
+    ];
+    expect(stopCooldown(meds, "nope", takenAt)).toEqual(meds);
+  });
+
+  it("does not affect other medications in the list (isolation across medications)", () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const meds = [
+      {
+        id: "1",
+        name: "Aspirin",
+        dose: "100mg",
+        intervalHours: 8,
+        cooldownIntervalHours: 8,
+        lastTakenAt: new Date(takenAt).toISOString(),
+      },
+      {
+        id: "2",
+        name: "Ibuprofen",
+        dose: "200mg",
+        intervalHours: 6,
+        cooldownIntervalHours: 6,
+        lastTakenAt: new Date(takenAt).toISOString(),
+      },
+    ];
+    const result = stopCooldown(meds, "1", takenAt);
+    expect(result[1]).toEqual(meds[1]);
+    expect(isInCooldown(result[1], takenAt)).toBe(true);
+  });
+
+  it("does not mutate the original list", () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const meds = [
+      {
+        id: "1",
+        name: "Aspirin",
+        dose: "100mg",
+        intervalHours: 8,
+        cooldownIntervalHours: 8,
+        lastTakenAt: new Date(takenAt).toISOString(),
+      },
+    ];
+    stopCooldown(meds, "1", takenAt);
+    expect(meds[0].lastTakenAt).not.toBeNull();
+  });
+
+  it("leaves intervalHours untouched, so a later GO press uses whatever interval is set at that moment (MED-11 AC4)", () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    let meds = [
+      {
+        id: "1",
+        name: "Aspirin",
+        dose: "100mg",
+        intervalHours: 8,
+        cooldownIntervalHours: 8,
+        lastTakenAt: new Date(takenAt).toISOString(),
+      },
+    ];
+
+    meds = stopCooldown(meds, "1", takenAt);
+    expect(meds[0].intervalHours).toBe(8);
+
+    meds = updateMedicationInterval(meds, "1", 3);
+    const laterTakenAt = takenAt + 60 * 60 * 1000;
+    meds = logDose(meds, "1", laterTakenAt);
+
+    expect(meds[0].cooldownIntervalHours).toBe(3);
+    expect(getCooldownTotalMs(meds[0])).toBe(3 * 60 * 60 * 1000);
   });
 });
 
