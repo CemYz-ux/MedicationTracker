@@ -1226,3 +1226,171 @@ test("shows an inline error and does not close the modal when the localStorage w
   // original name.
   await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
 });
+
+// --- MED-22: responsive grid -------------------------------------------
+
+// Resolves `.medication-list`'s computed `grid-template-columns` into a
+// track count (e.g. "342px 342px" -> 2) rather than reading the source
+// media query directly, so these tests exercise the same rendering the
+// user actually sees.
+async function getMedicationListColumnCount(page) {
+  return page.locator("#medication-list").evaluate((el) => {
+    return getComputedStyle(el).gridTemplateColumns.trim().split(/\s+/).length;
+  });
+}
+
+test("renders a single column below the 640px breakpoint, same as the pre-grid layout (MED-22 AC1)", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 639, height: 900 });
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+
+  expect(await getMedicationListColumnCount(page)).toBe(1);
+});
+
+test("renders a 2-column grid from 640px up to 999px with 2+ medications (MED-22 AC2)", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 640, height: 900 });
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+
+  expect(await getMedicationListColumnCount(page)).toBe(2);
+
+  await page.setViewportSize({ width: 999, height: 900 });
+  expect(await getMedicationListColumnCount(page)).toBe(2);
+});
+
+test("renders a 3-column grid at 1000px and up with 3+ medications (MED-22 AC3)", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1000, height: 900 });
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+  await addMedicationViaUi(page, { name: "Paracetamol", dose: "500mg", interval: "4" });
+
+  expect(await getMedicationListColumnCount(page)).toBe(3);
+});
+
+test("a list shorter than the column count occupies leftmost cells only, without stretching to fill the row (MED-22 AC4)", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const listWidth = (await page.locator("#medication-list").boundingBox()).width;
+  const itemBox = await page.locator(".medication-item").boundingBox();
+
+  // A lone card in a 3-column grid should occupy roughly one column
+  // (~1/3 of the list width) and sit flush against the list's left edge —
+  // not stretch across the two empty tracks beside it.
+  expect(itemBox.width).toBeLessThan(listWidth * 0.5);
+  expect(itemBox.x).toBeCloseTo((await page.locator("#medication-list").boundingBox()).x, 0);
+});
+
+test("the empty-state message still renders unaffected by the grid at a multi-column viewport (MED-22 AC5)", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+
+  await expect(
+    page.getByText("No medications yet — add one to get started.")
+  ).toBeVisible();
+  await expect(page.locator("#medication-list")).toBeHidden();
+});
+
+test("the page container's max-width grows at the 640px and 1000px breakpoints to fit the grid (MED-22 AC6)", async ({
+  page,
+}) => {
+  const maxWidthAt = async (viewportWidth) => {
+    await page.setViewportSize({ width: viewportWidth, height: 900 });
+    return page.evaluate(() => parseFloat(getComputedStyle(document.body).maxWidth));
+  };
+
+  const belowFirstBreakpoint = await maxWidthAt(639);
+  const atFirstBreakpoint = await maxWidthAt(640);
+  const atSecondBreakpoint = await maxWidthAt(1000);
+
+  expect(atFirstBreakpoint).toBeGreaterThan(belowFirstBreakpoint);
+  expect(atSecondBreakpoint).toBeGreaterThan(atFirstBreakpoint);
+});
+
+test("keyboard tab order follows DOM order, matching left-to-right visual grid order (MED-22 AC10)", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+  await addMedicationViaUi(page, { name: "Paracetamol", dose: "500mg", interval: "4" });
+
+  const items = page.locator(".medication-item");
+  await expect(items).toHaveCount(3);
+
+  // Confirm the 3 cards actually landed in one row, left-to-right, in DOM
+  // order first — the precondition the tab-order assertion below actually
+  // depends on (if the grid ever mis-ordered visually, this catches it
+  // before the tab-order check below could mask it).
+  const xPositions = await items.evaluateAll((els) =>
+    els.map((el) => el.getBoundingClientRect().x)
+  );
+  expect(xPositions[0]).toBeLessThan(xPositions[1]);
+  expect(xPositions[1]).toBeLessThan(xPositions[2]);
+
+  // Tab forward from a known starting point and record each row's Edit
+  // control (identified via its per-row aria-label) as it receives focus,
+  // in the order encountered — this must match DOM/add order (Aspirin,
+  // Ibuprofen, Paracetamol), regardless of how many other focusable
+  // controls (interval input, GO, Stop) sit between one row's Edit button
+  // and the next in the actual tab sequence.
+  const addTrigger = page.getByRole("button", { name: "+ Add medication" });
+  await addTrigger.focus();
+  await expect(addTrigger).toBeFocused();
+
+  const editButtonOrder = [];
+  for (let i = 0; i < 60 && editButtonOrder.length < 3; i++) {
+    await page.keyboard.press("Tab");
+    const editedName = await page.evaluate(() => {
+      const el = document.activeElement;
+      const isEditButton = el?.classList?.contains("icon-btn") && el.classList.contains("edit");
+      return isEditButton ? el.getAttribute("aria-label") : null;
+    });
+    if (editedName) editButtonOrder.push(editedName);
+  }
+
+  expect(editButtonOrder).toEqual(["Edit Aspirin", "Edit Ibuprofen", "Edit Paracetamol"]);
+});
+
+test("a status change on one card does not jitter its row-sharing sibling's height (MED-18 guarantee holds per-row in the grid, MED-22 AC8)", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 700, height: 900 });
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+
+  const items = page.locator(".medication-item");
+  const [aspirinItem, ibuprofenItem] = [items.nth(0), items.nth(1)];
+
+  // Confirm they actually share a grid row before trusting the rest of the
+  // assertions below.
+  const aspirinBoxBefore = await aspirinItem.boundingBox();
+  const ibuprofenBoxBefore = await ibuprofenItem.boundingBox();
+  expect(aspirinBoxBefore.y).toBeCloseTo(ibuprofenBoxBefore.y, 0);
+  expect(aspirinBoxBefore.height).toBeCloseTo(ibuprofenBoxBefore.height, 0);
+
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+  await expect(page.getByText("8h of 8h remaining")).toBeVisible();
+
+  const aspirinBoxAfter = await aspirinItem.boundingBox();
+  const ibuprofenBoxAfter = await ibuprofenItem.boundingBox();
+
+  // Aspirin itself keeps the same height on its own Active-to-Cooldown
+  // transition (MED-18) ...
+  expect(aspirinBoxAfter.height).toBe(aspirinBoxBefore.height);
+  // ... and, new for MED-22, its row-sharing sibling Ibuprofen — which
+  // never changed state at all — must not have its height or position
+  // perturbed either, i.e. no row-height jitter from a neighbor's status
+  // change.
+  expect(ibuprofenBoxAfter.height).toBe(ibuprofenBoxBefore.height);
+  expect(ibuprofenBoxAfter.y).toBe(ibuprofenBoxBefore.y);
+});
