@@ -1365,32 +1365,52 @@ test("a status change on one card does not jitter its row-sharing sibling's heig
   page,
 }) => {
   await page.setViewportSize({ width: 700, height: 900 });
+  // Aspirin's name is short and stays on a single line. Ibuprofen's name is
+  // deliberately long enough to wrap to multiple lines at this viewport's
+  // ~2-column card width, giving the two cards genuinely different
+  // intrinsic heights. That difference is the whole point: with Grid's
+  // default row-stretch behavior (i.e. without `align-items: start` on
+  // .medication-list), the shorter card would be stretched to match its
+  // taller row-mate, so a fixture where both cards happen to already be the
+  // same height can't actually catch a regression here (it'd pass either
+  // way). See css/styles.css `.medication-list` comment for the CSS fix
+  // this test guards.
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
-  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+  await addMedicationViaUi(page, {
+    name: "Amoxicillin Clavulanate Potassium Extended-Release",
+    dose: "200mg",
+    interval: "6",
+  });
 
   const items = page.locator(".medication-item");
-  const [aspirinItem, ibuprofenItem] = [items.nth(0), items.nth(1)];
+  const [aspirinItem, longNameItem] = [items.nth(0), items.nth(1)];
 
-  // Confirm they actually share a grid row before trusting the rest of the
-  // assertions below.
+  // Confirm they actually share a grid row ...
   const aspirinBoxBefore = await aspirinItem.boundingBox();
-  const ibuprofenBoxBefore = await ibuprofenItem.boundingBox();
-  expect(aspirinBoxBefore.y).toBeCloseTo(ibuprofenBoxBefore.y, 0);
-  expect(aspirinBoxBefore.height).toBeCloseTo(ibuprofenBoxBefore.height, 0);
+  const longNameBoxBefore = await longNameItem.boundingBox();
+  expect(aspirinBoxBefore.y).toBeCloseTo(longNameBoxBefore.y, 0);
+  // ... and, crucially, that the fixture isn't accidentally homogeneous
+  // again: the wrapping name must actually make its card taller than
+  // Aspirin's up front, proving there's a real height difference for
+  // row-stretch to (incorrectly) erase.
+  expect(longNameBoxBefore.height).toBeGreaterThan(aspirinBoxBefore.height);
 
   await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
   await expect(page.getByText("8h of 8h remaining")).toBeVisible();
 
   const aspirinBoxAfter = await aspirinItem.boundingBox();
-  const ibuprofenBoxAfter = await ibuprofenItem.boundingBox();
+  const longNameBoxAfter = await longNameItem.boundingBox();
 
   // Aspirin itself keeps the same height on its own Active-to-Cooldown
   // transition (MED-18) ...
   expect(aspirinBoxAfter.height).toBe(aspirinBoxBefore.height);
-  // ... and, new for MED-22, its row-sharing sibling Ibuprofen — which
-  // never changed state at all — must not have its height or position
-  // perturbed either, i.e. no row-height jitter from a neighbor's status
-  // change.
-  expect(ibuprofenBoxAfter.height).toBe(ibuprofenBoxBefore.height);
-  expect(ibuprofenBoxAfter.y).toBe(ibuprofenBoxBefore.y);
+  // ... and its row-sharing sibling — which never changed state at all —
+  // must not have its height or position perturbed either, i.e. no
+  // row-height jitter from a neighbor's status change.
+  expect(longNameBoxAfter.height).toBe(longNameBoxBefore.height);
+  expect(longNameBoxAfter.y).toBe(longNameBoxBefore.y);
+  // And the two cards must still differ in height exactly as before —
+  // proof that Aspirin's shorter card was never stretched up to match its
+  // taller sibling by the GO click's re-render.
+  expect(aspirinBoxAfter.height).toBeLessThan(longNameBoxAfter.height);
 });
