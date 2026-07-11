@@ -5,13 +5,13 @@ Living source of truth for what the site does. Update this file with every featu
 ## Add a medication
 **Status:** Implemented
 **Flow:**
-1. A "+ Add medication" control is shown prominently, top-center of the page. No add-medication form is otherwise visible on the list view.
-2. Activating the control opens a modal dialog (native `<dialog>` + `showModal()`) containing Name, Dose, and Interval (hours) fields.
+1. A circular floating action button (FAB), showing only a bare "+" glyph (accessible name "Add medication" via `aria-label`, mirroring the close control's "×" + `aria-label="Close"` pattern), is fixed to the bottom-right corner of the viewport at all times — on every viewport size, whether the list is empty or full, and regardless of scroll position (MED-23). It is the only control that opens the add-medication form. Its 56x56px touch target is deliberately larger than the app's ~44px baseline (MED-19), being the app's single primary action. The medication list reserves bottom space so the FAB never overlaps the last row of cards.
+2. Activating the control (click, or Enter/Space via keyboard) opens a modal dialog (native `<dialog>` + `showModal()`) containing Name, Dose, and Interval (hours) fields.
 3. User fills in Name, Dose, and Interval (hours) and submits.
 4. If Name, Dose, or Interval is empty, or Interval is non-numeric or not greater than zero, an inline error message is shown inside the modal (`role="alert"`), the modal stays open, and nothing is saved.
 5. On a valid submit, the medication is added with `lastTakenAt: null` (GO/cooldown are owned by MED-7/9 and not part of this flow), the modal closes, and the medication appears in "Your medications".
 6. The medication and its Name/Dose/Interval persist across page reloads (stored in `localStorage`).
-7. The modal can be closed at any time — via its close control, the Cancel button, pressing Escape, or clicking the backdrop — without saving. Every close path discards unsaved input, resets the form, and returns keyboard focus to the "+ Add medication" trigger.
+7. The modal can be closed at any time — via its close control, the Cancel button, pressing Escape, or clicking the backdrop — without saving. Every close path discards unsaved input, resets the form, and returns keyboard focus to the FAB.
 8. While the modal is open, Tab-based keyboard focus is contained inside it and cannot reach the page behind it.
 
 ## View medications
