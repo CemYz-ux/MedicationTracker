@@ -44,6 +44,31 @@ body {
   line-height: 1.6;
 }
 
+/* MED-22: the container cap grows in step with `.medication-list`'s column
+   count below, so the grid has room without any card shrinking below the
+   ~16rem floor. Math (box-sizing: border-box, so max-width already
+   includes body's 2rem horizontal padding + section's 2rem horizontal
+   padding + section's ~0.125rem border — call it ~4.1rem of fixed
+   overhead outside the grid itself):
+     640px:  2 cols + 1 gap (0.9rem) in 48rem  -> ~21.5rem/col
+     1000px: 3 cols + 2 gaps (1.8rem) in 64rem -> ~19.4rem/col
+   Both breakpoints match `.medication-list`'s below 1:1 — below 640px
+   `max-width` is unchanged from its original 40rem, so narrow/mobile
+   viewports render pixel-identical to the pre-MED-22 single column (AC1).
+   Still capped at 64rem so content doesn't stretch edge-to-edge on
+   ultra-wide monitors (AC6). */
+@media (min-width: 640px) {
+  body {
+    max-width: 48rem;
+  }
+}
+
+@media (min-width: 1000px) {
+  body {
+    max-width: 64rem;
+  }
+}
+
 h1,
 h2,
 label,
@@ -232,13 +257,48 @@ button:hover {
   color: var(--ink);
 }
 
+/* MED-22: CSS Grid, not flex — a single 1fr column below 640px renders
+   pixel-identical to the old flex-column layout (both stretch each
+   `<li>` to the container's full width with the same gap), so this is a
+   safe swap. Explicit `repeat(N, 1fr)` per breakpoint (rather than
+   `repeat(auto-fill, minmax(...))`) is deliberate: a grid item only ever
+   occupies the single cell it's auto-placed into, so a list shorter than
+   the column count fills the leftmost cells and leaves the remaining
+   *tracks* empty rather than stretching an existing card across them
+   (AC4) — that holds for `1fr` tracks the same as it would for
+   `auto-fill`, but explicit counts here read more clearly against the
+   breakpoints' fixed 2-col/3-col intent. Grid's default row-major
+   auto-placement (no `grid-auto-flow: column`, no `order` anywhere in
+   this file) keeps visual reading order identical to DOM order, so
+   tab/reading order never diverges from the visual grid (AC10).
+   `align-items: start` overrides Grid's default row-stretch behavior: a
+   row's items would otherwise all be forced to match the row's tallest
+   member (e.g. if a sibling card's name wraps to two lines), which would
+   grow a *shorter* card's own box beyond its natural MED-18 height purely
+   because of what's next to it — exactly the "grid must not stretch...
+   individual card content" a Cooldown card's countdown position depends
+   on (AC7). Each card keeps its own intrinsic (fixed, per MED-18) height
+   regardless of its row siblings. */
 .medication-list {
   list-style: none;
   padding: 0;
   margin: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: start;
   gap: 0.9rem;
+}
+
+@media (min-width: 640px) {
+  .medication-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1000px) {
+  .medication-list {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 
 .medication-item {
