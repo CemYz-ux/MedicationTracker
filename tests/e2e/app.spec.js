@@ -70,7 +70,7 @@ test("opens the add-medication modal from the trigger", async ({ page }) => {
   const dialog = page.locator("#add-medication-dialog");
   await expect(dialog).not.toBeVisible();
 
-  await page.getByRole("button", { name: "+ Add medication" }).click();
+  await page.locator("#add-medication-fab").click();
 
   await expect(dialog).toBeVisible();
   // Scoped to the dialog: MED-17's Edit dialog also has "Name"/"Dose"
@@ -82,12 +82,15 @@ test("opens the add-medication modal from the trigger", async ({ page }) => {
 });
 
 test("adds a valid medication and shows it in the list", async ({ page }) => {
-  await page.getByRole("button", { name: "+ Add medication" }).click();
+  await page.locator("#add-medication-fab").click();
   const dialog = page.locator("#add-medication-dialog");
   await dialog.getByLabel("Name").fill("Aspirin");
   await dialog.getByLabel("Dose").fill("100mg");
   await dialog.getByLabel("Interval (hours)").fill("8");
-  await page.getByRole("button", { name: "Add medication", exact: true }).click();
+  // Scoped to the dialog: the background Add-medication FAB (MED-23) shares
+  // this exact accessible name ("Add medication"), which would otherwise
+  // trip Playwright's strict-mode check against an unscoped page-wide query.
+  await dialog.getByRole("button", { name: "Add medication", exact: true }).click();
 
   await expect(dialog).not.toBeVisible();
   await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
@@ -97,22 +100,22 @@ test("adds a valid medication and shows it in the list", async ({ page }) => {
 test("shows a validation error and keeps the modal open when fields are empty", async ({
   page,
 }) => {
-  await page.getByRole("button", { name: "+ Add medication" }).click();
-  await page.getByRole("button", { name: "Add medication", exact: true }).click();
-
+  await page.locator("#add-medication-fab").click();
   const dialog = page.locator("#add-medication-dialog");
+  await dialog.getByRole("button", { name: "Add medication", exact: true }).click();
+
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("alert")).not.toBeEmpty();
   await expect(page.getByText("No medications yet — add one to get started.")).toBeVisible();
 });
 
 test("shows a validation error for a non-numeric or non-positive interval", async ({ page }) => {
-  await page.getByRole("button", { name: "+ Add medication" }).click();
+  await page.locator("#add-medication-fab").click();
   const dialog = page.locator("#add-medication-dialog");
   await dialog.getByLabel("Name").fill("Aspirin");
   await dialog.getByLabel("Dose").fill("100mg");
   await dialog.getByLabel("Interval (hours)").fill("0");
-  await page.getByRole("button", { name: "Add medication", exact: true }).click();
+  await dialog.getByRole("button", { name: "Add medication", exact: true }).click();
 
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("alert")).toHaveText(
@@ -122,12 +125,12 @@ test("shows a validation error for a non-numeric or non-positive interval", asyn
 });
 
 test("persists an added medication across a reload", async ({ page }) => {
-  await page.getByRole("button", { name: "+ Add medication" }).click();
+  await page.locator("#add-medication-fab").click();
   const dialog = page.locator("#add-medication-dialog");
   await dialog.getByLabel("Name").fill("Ibuprofen");
   await dialog.getByLabel("Dose").fill("200mg");
   await dialog.getByLabel("Interval (hours)").fill("6");
-  await page.getByRole("button", { name: "Add medication", exact: true }).click();
+  await dialog.getByRole("button", { name: "Add medication", exact: true }).click();
 
   await page.reload();
 
@@ -137,7 +140,7 @@ test("persists an added medication across a reload", async ({ page }) => {
 test("closing via Cancel discards unsaved input and returns focus to the trigger", async ({
   page,
 }) => {
-  const trigger = page.getByRole("button", { name: "+ Add medication" });
+  const trigger = page.locator("#add-medication-fab");
   await trigger.click();
   await page.locator("#add-medication-dialog").getByLabel("Name").fill("Should not be saved");
 
@@ -151,7 +154,7 @@ test("closing via Cancel discards unsaved input and returns focus to the trigger
 test("closing via the close control discards unsaved input and returns focus to the trigger", async ({
   page,
 }) => {
-  const trigger = page.getByRole("button", { name: "+ Add medication" });
+  const trigger = page.locator("#add-medication-fab");
   await trigger.click();
   await page.locator("#add-medication-dialog").getByLabel("Name").fill("Should not be saved");
 
@@ -165,7 +168,7 @@ test("closing via the close control discards unsaved input and returns focus to 
 test("closing via Escape discards unsaved input and returns focus to the trigger", async ({
   page,
 }) => {
-  const trigger = page.getByRole("button", { name: "+ Add medication" });
+  const trigger = page.locator("#add-medication-fab");
   await trigger.click();
   await page.locator("#add-medication-dialog").getByLabel("Name").fill("Should not be saved");
 
@@ -179,7 +182,7 @@ test("closing via Escape discards unsaved input and returns focus to the trigger
 test("closing via a backdrop click discards unsaved input and returns focus to the trigger", async ({
   page,
 }) => {
-  const trigger = page.getByRole("button", { name: "+ Add medication" });
+  const trigger = page.locator("#add-medication-fab");
   await trigger.click();
   const dialog = page.locator("#add-medication-dialog");
   await dialog.getByLabel("Name").fill("Should not be saved");
@@ -194,13 +197,13 @@ test("closing via a backdrop click discards unsaved input and returns focus to t
 });
 
 test("focuses the Name field, not the close button, when the modal opens", async ({ page }) => {
-  await page.getByRole("button", { name: "+ Add medication" }).click();
+  await page.locator("#add-medication-fab").click();
 
   await expect(page.locator("#add-medication-dialog").getByLabel("Name")).toBeFocused();
 });
 
 test("focus stays trapped inside the modal while open", async ({ page }) => {
-  await page.getByRole("button", { name: "+ Add medication" }).click();
+  await page.locator("#add-medication-fab").click();
 
   // Tab past every focusable element inside the dialog; focus should stay inside it.
   for (let i = 0; i < 10; i++) {
@@ -215,12 +218,12 @@ test("focus stays trapped inside the modal while open", async ({ page }) => {
 });
 
 test("editing an existing medication's interval persists across reload", async ({ page }) => {
-  await page.getByRole("button", { name: "+ Add medication" }).click();
+  await page.locator("#add-medication-fab").click();
   const addDialog = page.locator("#add-medication-dialog");
   await addDialog.getByLabel("Name").fill("Aspirin");
   await addDialog.getByLabel("Dose").fill("100mg");
   await addDialog.getByLabel("Interval (hours)").fill("8");
-  await page.getByRole("button", { name: "Add medication", exact: true }).click();
+  await addDialog.getByRole("button", { name: "Add medication", exact: true }).click();
 
   const intervalInput = page.getByLabel("Interval (hours)").last();
   await intervalInput.fill("12");
@@ -236,12 +239,12 @@ test("editing an existing medication's interval persists across reload", async (
 test("editing a medication's interval to an invalid value shows an error and retains the saved value", async ({
   page,
 }) => {
-  await page.getByRole("button", { name: "+ Add medication" }).click();
+  await page.locator("#add-medication-fab").click();
   const addDialog = page.locator("#add-medication-dialog");
   await addDialog.getByLabel("Name").fill("Aspirin");
   await addDialog.getByLabel("Dose").fill("100mg");
   await addDialog.getByLabel("Interval (hours)").fill("8");
-  await page.getByRole("button", { name: "Add medication", exact: true }).click();
+  await addDialog.getByRole("button", { name: "Add medication", exact: true }).click();
 
   const intervalInput = page.getByLabel("Interval (hours)").last();
   await intervalInput.fill("-1");
@@ -260,12 +263,12 @@ test("editing a medication's interval to an invalid value shows an error and ret
 test("after a successful interval edit, a later invalid edit retains the newly saved value (not the original)", async ({
   page,
 }) => {
-  await page.getByRole("button", { name: "+ Add medication" }).click();
+  await page.locator("#add-medication-fab").click();
   const addDialog = page.locator("#add-medication-dialog");
   await addDialog.getByLabel("Name").fill("Aspirin");
   await addDialog.getByLabel("Dose").fill("100mg");
   await addDialog.getByLabel("Interval (hours)").fill("8");
-  await page.getByRole("button", { name: "Add medication", exact: true }).click();
+  await addDialog.getByRole("button", { name: "Add medication", exact: true }).click();
 
   const intervalInput = page.getByLabel("Interval (hours)").last();
 
@@ -290,7 +293,7 @@ test("after a successful interval edit, a later invalid edit retains the newly s
 });
 
 async function addMedicationViaUi(page, { name, dose, interval }) {
-  await page.getByRole("button", { name: "+ Add medication" }).click();
+  await page.locator("#add-medication-fab").click();
 
   // Scoped to the dialog: once a medication row already exists in the list,
   // its own "Interval (hours)" field would otherwise also match
@@ -299,7 +302,7 @@ async function addMedicationViaUi(page, { name, dose, interval }) {
   await dialog.getByLabel("Name").fill(name);
   await dialog.getByLabel("Dose").fill(dose);
   await dialog.getByLabel("Interval (hours)").fill(interval);
-  await page.getByRole("button", { name: "Add medication", exact: true }).click();
+  await dialog.getByRole("button", { name: "Add medication", exact: true }).click();
 }
 
 test("pressing GO records the current timestamp, persists it, and disables that medication's GO button", async ({
@@ -384,7 +387,7 @@ test("pressing GO via keyboard keeps focus in place instead of teleporting it to
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
   const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
-  const addTrigger = page.getByRole("button", { name: "+ Add medication" });
+  const addTrigger = page.locator("#add-medication-fab");
 
   // The add-medication flow itself returns focus to addTrigger once the
   // dialog finishes closing; wait for that settle before deliberately
@@ -398,9 +401,9 @@ test("pressing GO via keyboard keeps focus in place instead of teleporting it to
 
   await expect(goButton).toBeDisabled();
   // Regression guard: disabling the button used to steal focus and hand it
-  // to the unrelated "+ Add medication" trigger at the top of the page,
-  // silently as far as a keyboard/screen-reader user is concerned. Focus
-  // must stay somewhere contextual to the action just taken instead.
+  // to the unrelated Add-medication FAB (bottom-right, MED-23), silently as
+  // far as a keyboard/screen-reader user is concerned. Focus must stay
+  // somewhere contextual to the action just taken instead.
   await expect(addTrigger).not.toBeFocused();
   await expect(goButton).toBeFocused();
 });
@@ -501,7 +504,7 @@ test("pressing Enter a second time on an already-cooldown GO button does not rec
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
   const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
-  const addTrigger = page.getByRole("button", { name: "+ Add medication" });
+  const addTrigger = page.locator("#add-medication-fab");
 
   // The add-medication flow itself returns focus to addTrigger once the
   // dialog finishes closing; wait for that settle before deliberately
@@ -808,7 +811,7 @@ test("pressing Stop moves focus to the now-enabled GO button, not somewhere unre
 
   const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
   const stopButton = page.getByRole("button", { name: "Stop — cancel Aspirin cooldown" });
-  const addTrigger = page.getByRole("button", { name: "+ Add medication" });
+  const addTrigger = page.locator("#add-medication-fab");
 
   // The add-medication flow itself returns focus to addTrigger once the
   // dialog finishes closing; wait for that settle before driving our own
@@ -826,7 +829,7 @@ test("pressing Stop moves focus to the now-enabled GO button, not somewhere unre
   await expect(goButton).toBeEnabled();
   // Regression guard mirroring the equivalent GO test: cancelling and
   // hiding the control that held focus must not silently drop focus to the
-  // unrelated "+ Add medication" trigger.
+  // unrelated Add-medication FAB.
   await expect(addTrigger).not.toBeFocused();
   await expect(goButton).toBeFocused();
 });
@@ -1343,7 +1346,7 @@ test("keyboard tab order follows DOM order, matching left-to-right visual grid o
   // Ibuprofen, Paracetamol), regardless of how many other focusable
   // controls (interval input, GO, Stop) sit between one row's Edit button
   // and the next in the actual tab sequence.
-  const addTrigger = page.getByRole("button", { name: "+ Add medication" });
+  const addTrigger = page.locator("#add-medication-fab");
   await addTrigger.focus();
   await expect(addTrigger).toBeFocused();
 
@@ -1413,4 +1416,130 @@ test("a status change on one card does not jitter its row-sharing sibling's heig
   // proof that Aspirin's shorter card was never stretched up to match its
   // taller sibling by the GO click's re-render.
   expect(aspirinBoxAfter.height).toBeLessThan(longNameBoxAfter.height);
+});
+
+// --- MED-23: floating "+" add-medication button ----------------------
+
+test("the FAB is visible in the bottom-right corner when the medication list is empty (MED-23 AC1, AC6)", async ({
+  page,
+}) => {
+  await expect(
+    page.getByText("No medications yet — add one to get started.")
+  ).toBeVisible();
+
+  const fab = page.locator("#add-medication-fab");
+  await expect(fab).toBeVisible();
+  // Bare "+" glyph, no visible text label (AC2) — the accessible name comes
+  // entirely from aria-label, mirroring .close-dialog-btn's "×" pattern.
+  await expect(fab).toHaveText("+");
+  await expect(fab).toHaveAccessibleName("Add medication");
+});
+
+test("the FAB's touch target is at least 56x56px, larger than the app's ~44px baseline (MED-23 AC4)", async ({
+  page,
+}) => {
+  const box = await page.locator("#add-medication-fab").boundingBox();
+  expect(box.width).toBeGreaterThanOrEqual(56);
+  expect(box.height).toBeGreaterThanOrEqual(56);
+});
+
+test("the FAB uses the app's --go color token as its fill (MED-23 AC11)", async ({ page }) => {
+  const [fabColor, goTokenColor] = await page.evaluate(() => {
+    const fab = document.getElementById("add-medication-fab");
+    const probe = document.createElement("div");
+    probe.style.background = getComputedStyle(document.documentElement).getPropertyValue("--go");
+    document.body.append(probe);
+    const resolved = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return [getComputedStyle(fab).backgroundColor, resolved];
+  });
+  expect(fabColor).toBe(goTokenColor);
+});
+
+test("the FAB stays fixed in the bottom-right corner while the list is scrolled, and never overlaps the last row of cards (MED-23 AC5)", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 700, height: 600 });
+
+  // Enough medications to make the page taller than the viewport at this
+  // width (2-column grid), so scrolling is actually exercised rather than
+  // trivially passing because the page never scrolls at all.
+  for (let i = 0; i < 12; i++) {
+    await addMedicationViaUi(page, {
+      name: `Medication ${i}`,
+      dose: "100mg",
+      interval: "8",
+    });
+  }
+
+  const fab = page.locator("#add-medication-fab");
+  const boxBeforeScroll = await fab.boundingBox();
+
+  await page.mouse.wheel(0, 10_000);
+  await expect(async () => {
+    const scrollY = await page.evaluate(() => window.scrollY);
+    expect(scrollY).toBeGreaterThan(0);
+  }).toPass();
+
+  // Fixed positioning: the FAB's viewport-relative box is unchanged by the
+  // scroll even though the page content moved underneath it.
+  const boxAfterScroll = await fab.boundingBox();
+  expect(boxAfterScroll.x).toBeCloseTo(boxBeforeScroll.x, 0);
+  expect(boxAfterScroll.y).toBeCloseTo(boxBeforeScroll.y, 0);
+
+  // At (or near) the bottom of a fully-scrolled page, the FAB must not
+  // overlap the last card's bounding box.
+  const lastCardBox = await page.locator(".medication-item").last().boundingBox();
+  const overlaps =
+    boxAfterScroll.x < lastCardBox.x + lastCardBox.width &&
+    boxAfterScroll.x + boxAfterScroll.width > lastCardBox.x &&
+    boxAfterScroll.y < lastCardBox.y + lastCardBox.height &&
+    boxAfterScroll.y + boxAfterScroll.height > lastCardBox.y;
+  expect(overlaps).toBe(false);
+});
+
+test("the FAB keeps a fixed size and a consistent margin from the viewport's bottom-right corner across viewport widths, independent of the MED-22 grid's column count (MED-23 AC10)", async ({
+  page,
+}) => {
+  const fab = page.locator("#add-medication-fab");
+  const viewportHeight = 900;
+  const widths = [375, 640, 1000, 1400];
+  const measurements = [];
+
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: viewportHeight });
+    const box = await fab.boundingBox();
+    measurements.push({
+      width: box.width,
+      height: box.height,
+      rightOffset: width - (box.x + box.width),
+      bottomOffset: viewportHeight - (box.y + box.height),
+    });
+  }
+
+  for (const measurement of measurements.slice(1)) {
+    expect(measurement.width).toBeCloseTo(measurements[0].width, 0);
+    expect(measurement.height).toBeCloseTo(measurements[0].height, 0);
+    expect(measurement.rightOffset).toBeCloseTo(measurements[0].rightOffset, 0);
+    expect(measurement.bottomOffset).toBeCloseTo(measurements[0].bottomOffset, 0);
+  }
+});
+
+test("the FAB is keyboard-reachable and opens the unchanged add-medication dialog via Enter, returning focus to the FAB on close (MED-23 AC7-AC9)", async ({
+  page,
+}) => {
+  const fab = page.locator("#add-medication-fab");
+  await fab.focus();
+  await expect(fab).toBeFocused();
+
+  await page.keyboard.press("Enter");
+
+  const dialog = page.locator("#add-medication-dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("Name")).toBeFocused();
+
+  await page.keyboard.press("Escape");
+
+  await expect(dialog).not.toBeVisible();
+  await expect(fab).toBeFocused();
 });
