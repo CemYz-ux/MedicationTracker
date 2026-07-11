@@ -12,11 +12,15 @@
     <p>Keep track of the medications you take, their dose, and how often to take them.</p>
   </header>
 
-  <div class="add-medication-bar">
-    <button id="add-medication-trigger" type="button" class="add-medication-trigger">
-      + Add medication
-    </button>
-  </div>
+  <!-- MED-23: floating action button, replacing the old top-center
+       add-medication bar/trigger. Bare "+" glyph + aria-label mirrors the
+       app's existing bare-glyph-plus-aria-label pattern already used by
+       .close-dialog-btn ("×" + aria-label="Close"). Positioned in the DOM
+       right after the header (same spot the old trigger occupied) so tab
+       order is unaffected by its `position: fixed` styling. -->
+  <button id="add-medication-fab" type="button" class="add-medication-fab" aria-label="Add medication">
+    +
+  </button>
 
   <main>
     <dialog id="add-medication-dialog" class="app-dialog" aria-labelledby="add-medication-dialog-title">

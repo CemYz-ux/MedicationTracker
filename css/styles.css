@@ -91,6 +91,18 @@ header p {
   color: var(--ink-soft);
 }
 
+/* MED-23 AC5: reserves room below the medication list so the fixed FAB
+   (bottom-right, a 1.5rem margin + 3.5rem size = 5rem footprint from the
+   viewport's bottom edge — see .add-medication-fab) never sits on top of
+   the last row of cards once the page is scrolled to its end. Applied to
+   `main` (which wraps the list's <section>), not left to the footer's
+   incidental margin below it, so the guarantee holds regardless of footer
+   content or how it wraps at a given viewport width. 6rem clears the FAB's
+   5rem footprint with a 1rem buffer to spare. */
+main {
+  padding-bottom: 6rem;
+}
+
 section {
   margin-block: 1.5rem;
   padding: 1rem;
@@ -178,22 +190,32 @@ button:hover {
   display: none;
 }
 
-.add-medication-bar {
+/* MED-23: floating action button, replacing the old top-center
+   .add-medication-bar/.add-medication-trigger. `position: fixed` pins it to
+   the viewport's bottom-right corner regardless of scroll position or the
+   MED-22 grid's column count (AC5, AC10) — its margin from the edges (1.5rem)
+   and size (3.5rem = 56px) are viewport-independent, no media queries here.
+   56px is deliberately above the app's ~44px baseline touch target
+   (MED-19) since this is the app's single primary action (AC4). No custom
+   hover/focus-visible rule is needed: the generic `button:hover` and
+   `button:focus-visible` rules already apply (it's a plain <button>). */
+.add-medication-fab {
+  position: fixed;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  padding: 0;
   display: flex;
+  align-items: center;
   justify-content: center;
-  padding-block: 0.5rem 1rem;
-}
-
-.add-medication-trigger {
-  font-size: 1.05rem;
-  padding: 0.7rem 1.4rem;
-  border-radius: 999px;
+  border-radius: 50%;
   background: var(--go);
   color: #fff;
-}
-
-.add-medication-trigger:hover {
-  background: #255a43;
+  font-size: 2rem;
+  line-height: 1;
+  box-shadow: 0 8px 24px -8px rgba(23, 34, 42, 0.4);
+  z-index: 10;
 }
 
 /* Shared by every app dialog (Add — MED-5, Edit — MED-17): each is its own
