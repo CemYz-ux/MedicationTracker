@@ -1826,6 +1826,13 @@ test("keyboard focus moves to the previous row's Delete button after deleting th
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
   await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
 
+  // Settle the trailing add's own dialog-close-driven `trigger.focus()`
+  // before moving focus elsewhere (see this repo's established Playwright
+  // focus-race pattern, used above in the "middle item" test).
+  const addTrigger = page.locator("#add-medication-fab");
+  await addTrigger.focus();
+  await expect(addTrigger).toBeFocused();
+
   const deleteIbuprofen = page.getByRole("button", { name: "Delete Ibuprofen" });
   await deleteIbuprofen.focus();
   await expect(deleteIbuprofen).toBeFocused();
