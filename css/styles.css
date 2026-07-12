@@ -32,9 +32,22 @@
   box-sizing: border-box;
 }
 
+/* MED-23 AC5 (bugfix, see below): the bottom padding reserves room below
+   *all* page content — not just the medication list — so the fixed FAB
+   (bottom-right, a 1.5rem margin + 3.5rem size = 5rem footprint from the
+   viewport's bottom edge — see .add-medication-fab) never sits on top of
+   whatever renders last on the page once scrolled to the end. Originally
+   this clearance lived on `main`'s padding-bottom, but `<footer>` renders
+   after `</main>`, so that gap sat between the card list and the footer
+   instead of below the footer — the FAB still overlapped the footer's
+   disclaimer text at the true bottom of the page. Applying it to `body`
+   instead guarantees the clearance sits after the last element on the
+   page, whatever that ends up being. 6rem clears the FAB's 5rem footprint
+   with a 1rem buffer to spare (up from the original 3rem general-purpose
+   bottom padding, which this replaces). */
 body {
   margin: 0;
-  padding: 0 1rem 3rem;
+  padding: 0 1rem 6rem;
   max-width: 40rem;
   margin-inline: auto;
   background: var(--paper);
@@ -178,22 +191,32 @@ button:hover {
   display: none;
 }
 
-.add-medication-bar {
+/* MED-23: floating action button, replacing the old top-center
+   .add-medication-bar/.add-medication-trigger. `position: fixed` pins it to
+   the viewport's bottom-right corner regardless of scroll position or the
+   MED-22 grid's column count (AC5, AC10) — its margin from the edges (1.5rem)
+   and size (3.5rem = 56px) are viewport-independent, no media queries here.
+   56px is deliberately above the app's ~44px baseline touch target
+   (MED-19) since this is the app's single primary action (AC4). No custom
+   hover/focus-visible rule is needed: the generic `button:hover` and
+   `button:focus-visible` rules already apply (it's a plain <button>). */
+.add-medication-fab {
+  position: fixed;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  padding: 0;
   display: flex;
+  align-items: center;
   justify-content: center;
-  padding-block: 0.5rem 1rem;
-}
-
-.add-medication-trigger {
-  font-size: 1.05rem;
-  padding: 0.7rem 1.4rem;
-  border-radius: 999px;
+  border-radius: 50%;
   background: var(--go);
   color: #fff;
-}
-
-.add-medication-trigger:hover {
-  background: #255a43;
+  font-size: 2rem;
+  line-height: 1;
+  box-shadow: 0 8px 24px -8px rgba(23, 34, 42, 0.4);
+  z-index: 10;
 }
 
 /* Shared by every app dialog (Add — MED-5, Edit — MED-17): each is its own

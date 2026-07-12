@@ -18,7 +18,7 @@ import {
 // comfortably satisfies both without excessive DOM churn for a small list.
 const COOLDOWN_TICK_MS = 30_000;
 
-const trigger = document.getElementById("add-medication-trigger");
+const trigger = document.getElementById("add-medication-fab");
 const dialog = document.getElementById("add-medication-dialog");
 const form = document.getElementById("add-medication-form");
 const nameInput = document.getElementById("med-name");
@@ -247,7 +247,7 @@ function renderMedicationItem(medication) {
   // `aria-disabled` (not the native `disabled` attribute) on purpose: making
   // an element natively disabled while it holds keyboard focus forces the
   // browser to move focus elsewhere (observed landing on the unrelated
-  // "+ Add medication" trigger), with no announcement to screen readers.
+  // Add-medication FAB, MED-23), with no announcement to screen readers.
   // aria-disabled keeps the button focusable — the click handler below
   // no-ops instead — so focus simply stays where the user left it.
 
