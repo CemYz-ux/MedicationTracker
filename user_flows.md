@@ -18,7 +18,7 @@ Living source of truth for what the site does. Update this file with every featu
 **Status:** Implemented
 **Flow:**
 1. On page load, previously logged medications are read from `localStorage` and rendered in a list.
-2. Each row shows the medication's name, dose, a small Edit (pencil-icon) control (see "Edit a medication's Name and Dosage" below), a status pill, live cooldown countdown text (cooldown-only — see "Cooldown countdown and fill"), an editable Interval (hours) input, and a GO button (see "Log a dose (press GO)" below) — no delete control yet; that belongs to a later story.
+2. Each row shows the medication's name, dose, a small Edit (pencil-icon) control (see "Edit a medication's Name and Dosage" below) and a small Delete ("x") control (see "Delete a medication" below) grouped together in the card header, a status pill, live cooldown countdown text (cooldown-only — see "Cooldown countdown and fill"), an editable Interval (hours) input, and a GO button (see "Log a dose (press GO)" below).
 3. The status pill is a green "Active" pill when GO is enabled, or an amber "Cooldown" pill when GO is disabled. It reflects the same time-based cooldown check the GO button and countdown text use — no separate logic of its own.
 4. If there are no medications (including corrupted/missing stored data), an empty-state message ("No medications yet — add one to get started.") is shown instead of the list.
 5. Records left over from the old prototype schema (`{id, name, dose, time}`, no `intervalHours`) are silently discarded on load rather than shown or migrated.
@@ -37,7 +37,7 @@ Living source of truth for what the site does. Update this file with every featu
 ## Edit a medication's Name and Dosage
 **Status:** Implemented
 **Flow:**
-1. Every medication card (Active or Cooldown) shows a small pencil-icon "Edit" control in its header, labeled for assistive tech as "Edit {medication name}" and reachable/operable via keyboard alone (Tab to focus, Enter/Space to activate) — the first per-card secondary-action icon button in the app; there is no delete ("x") control yet to sit alongside it.
+1. Every medication card (Active or Cooldown) shows a small pencil-icon "Edit" control in its header, labeled for assistive tech as "Edit {medication name}" and reachable/operable via keyboard alone (Tab to focus, Enter/Space to activate) — the first per-card secondary-action icon button in the app, sitting alongside the Delete ("x") control (see "Delete a medication" below).
 2. Activating a card's Edit control opens a modal dialog (native `<dialog>` + `showModal()`) containing only Name and Dose fields, pre-filled with that specific medication's current saved values — never blank, and never another medication's values. This is a separate dialog element from the Add-medication modal (mirrors its markup/CSS classes and interaction pattern, but is not a shared/mode-toggling dialog), and it deliberately has no Interval field — Interval remains editable exclusively via its own existing inline per-card control (see "Edit a medication's interval" below).
 3. User changes Name and/or Dose and submits.
 4. If Name or Dose is empty, an inline error message is shown inside the modal (`role="alert"`), the modal stays open, and nothing is saved — mirroring the Add-medication modal's own empty-field validation.
@@ -47,6 +47,19 @@ Living source of truth for what the site does. Update this file with every featu
 8. While the modal is open, Tab-based keyboard focus is contained inside it and cannot reach the page behind it (native `<dialog>` modal behavior, same mechanism the Add-medication modal relies on).
 9. The edited Name/Dose persist across a page reload.
 10. Editing one medication's Name/Dose never affects any other medication's data (name, dose, interval, cooldown state) or display.
+
+## Delete a medication
+**Status:** Implemented
+**Flow:**
+1. Every medication card (Active or Cooldown) shows a small "x" Delete control in its header, next to the Edit control, labeled for assistive tech as "Delete {medication name}" and reachable/operable via keyboard alone (Tab to focus, Enter/Space to activate) — reuses the same `.icon-btn` base styling as Edit, with its own hover treatment.
+2. Activating the control (click, or Enter/Space via keyboard) deletes that medication immediately — no confirmation dialog or intermediate step. This is a deliberate product decision: a medication's definition is trivial to re-add, and the only real cost of an accidental delete is losing an in-progress cooldown, judged an acceptable tradeoff for this app's scope.
+3. Deletion is permanent. There is no undo.
+4. The medication is removed from `localStorage` immediately, so it does not reappear after a page reload.
+5. Deleting a medication that is currently in Cooldown discards its countdown/timestamp data the same way as deleting an Active one — there is no special-casing by status.
+6. Deleting one medication never affects any other medication's data or displayed state (Active/Cooldown status, countdown, values) — same multi-medication independence principle established elsewhere in this app.
+7. Deleting the last remaining medication returns the list to the empty state defined in "View medications" ("No medications yet — add one to get started."). The Add-medication FAB remains visible and usable, since it lives outside the medication list.
+8. Keyboard focus moves to a nearby row's Delete control immediately after a delete succeeds, since the deleted row's own controls (including the Delete control that had focus) no longer exist in the DOM: the row that shifted up into the deleted row's position, or the new last row if the deleted row was last. Only when the list is now completely empty does focus move to the Add-medication FAB instead — the correct target once there is no row left at all.
+9. If saving the deletion fails (e.g. storage full/unavailable), an inline error ("Could not delete — please try again.") is shown next to that row, the medication is not removed from the displayed list, and nothing is written to storage — the UI never implies a deletion that wasn't persisted, mirroring GO/Stop/Edit's own storage-failure discipline.
 
 ## Edit a medication's interval
 **Status:** Implemented

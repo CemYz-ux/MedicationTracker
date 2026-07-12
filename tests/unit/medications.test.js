@@ -402,6 +402,39 @@ describe("removeMedication", () => {
     const meds = [{ id: "1", name: "A" }];
     expect(removeMedication(meds, "nope")).toEqual(meds);
   });
+
+  it("discards a cooldown medication's countdown/timestamp data along with it, with no special-casing vs. an Active medication (MED-12 AC6)", () => {
+    const meds = [
+      { id: "1", name: "Active one", lastTakenAt: null },
+      {
+        id: "2",
+        name: "Cooldown one",
+        lastTakenAt: "2026-07-12T00:00:00.000Z",
+        cooldownIntervalHours: 8,
+        intervalHours: 8,
+      },
+    ];
+    // Same filter-by-id code path handles both — there is no branch on
+    // cooldown status, so a cooldown medication's extra fields are simply
+    // gone with the rest of the record, not cleared or migrated specially.
+    expect(removeMedication(meds, "2")).toEqual([meds[0]]);
+  });
+
+  it("leaves every other medication's data completely unaffected when one of several is deleted (MED-12 AC7)", () => {
+    const meds = [
+      { id: "1", name: "A", intervalHours: 4, lastTakenAt: null },
+      {
+        id: "2",
+        name: "B",
+        intervalHours: 8,
+        lastTakenAt: "2026-07-12T00:00:00.000Z",
+        cooldownIntervalHours: 8,
+      },
+      { id: "3", name: "C", intervalHours: 6, lastTakenAt: null },
+    ];
+    const result = removeMedication(meds, "2");
+    expect(result).toEqual([meds[0], meds[2]]);
+  });
 });
 
 describe("logDose", () => {

@@ -1592,3 +1592,276 @@ test("the FAB is keyboard-reachable and opens the unchanged add-medication dialo
   await expect(dialog).not.toBeVisible();
   await expect(fab).toBeFocused();
 });
+
+// --- MED-12: delete a medication ------------------------------------------
+
+test("shows a per-card Delete control, keyboard-reachable, with an accessible name identifying the medication (MED-12 AC1-AC2, AC9)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const deleteButton = page.getByRole("button", { name: "Delete Aspirin" });
+  await expect(deleteButton).toBeVisible();
+
+  // Reachable by keyboard alone: Tab to it, then Enter/Space activates it —
+  // exercised end-to-end by the keyboard-activation tests below, which
+  // drive it with real key presses; this test only proves it's in the Tab
+  // order with the right accessible name/role (mirrors the equivalent
+  // MED-17 Edit-control test).
+  await deleteButton.focus();
+  await expect(deleteButton).toBeFocused();
+});
+
+test("shows the Delete control on a Cooldown medication too, not just Active (MED-12 AC1)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+
+  await expect(page.locator(".medication-item")).toHaveClass(/cooldown/);
+  await expect(page.getByRole("button", { name: "Delete Aspirin" })).toBeVisible();
+});
+
+test("activating Delete removes the medication immediately, with no confirmation dialog or intermediate step (MED-12 AC3)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
+
+  await page.getByRole("button", { name: "Delete Aspirin" }).click();
+
+  // No dialog of any kind appears — the row is simply gone.
+  await expect(page.locator("dialog[open]")).toHaveCount(0);
+  await expect(page.getByText("Aspirin — 100mg")).toBeHidden();
+});
+
+test("a deleted medication is removed from localStorage and does not reappear on reload (MED-12 AC5)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+
+  await page.getByRole("button", { name: "Delete Aspirin" }).click();
+
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("medications"))
+  );
+  expect(stored).toHaveLength(1);
+  expect(stored[0]).toMatchObject({ name: "Ibuprofen" });
+
+  await page.reload();
+
+  await expect(page.getByText("Aspirin — 100mg")).toBeHidden();
+  await expect(page.getByText("Ibuprofen — 200mg")).toBeVisible();
+});
+
+test("shows an inline error and leaves the row in place when the localStorage write fails on Delete (MED-12 review)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  // Simulate a storage failure (e.g. quota exceeded) for writes made after
+  // this point, without touching the add-medication flow that already
+  // succeeded above — same technique as the equivalent GO/Stop/Edit tests.
+  await page.evaluate(() => {
+    window.localStorage.setItem = () => {
+      throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+    };
+  });
+
+  await page.getByRole("button", { name: "Delete Aspirin" }).click();
+
+  await expect(page.getByRole("alert").last()).toHaveText(
+    "Could not delete — please try again."
+  );
+  // The displayed state must not imply the deletion happened: the row is
+  // still there, and (per the earlier successful add) storage is unaffected.
+  await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Delete Aspirin" })).toBeVisible();
+});
+
+test("deleting a medication that is currently in Cooldown discards its countdown/timestamp data with no special-casing vs. deleting an Active one (MED-12 AC6)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+  await expect(page.locator(".medication-item")).toHaveClass(/cooldown/);
+
+  await page.getByRole("button", { name: "Delete Aspirin" }).click();
+
+  await expect(page.getByText("Aspirin — 100mg")).toBeHidden();
+  await expect(
+    page.getByText("No medications yet — add one to get started.")
+  ).toBeVisible();
+
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("medications"))
+  );
+  expect(stored).toEqual([]);
+});
+
+test("deleting one medication leaves every other medication's data and displayed state completely unaffected (MED-12 AC7)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+  await addMedicationViaUi(page, { name: "Paracetamol", dose: "500mg", interval: "4" });
+
+  // Put the surviving medications into two different states so the
+  // assertion below actually proves independence, not just "the row is
+  // still there": Ibuprofen stays Active, Paracetamol goes into Cooldown.
+  await page.getByRole("button", { name: "GO — log Paracetamol taken" }).click();
+  await expect(page.getByRole("button", { name: "GO — log Paracetamol taken" })).toBeDisabled();
+
+  await page.getByRole("button", { name: "Delete Aspirin" }).click();
+
+  await expect(page.getByText("Aspirin — 100mg")).toBeHidden();
+  await expect(page.getByText("Ibuprofen — 200mg")).toBeVisible();
+  await expect(page.getByText("Paracetamol — 500mg")).toBeVisible();
+  await expect(page.getByRole("button", { name: "GO — log Ibuprofen taken" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "GO — log Paracetamol taken" })).toBeDisabled();
+  await expect(page.locator(".medication-item", { hasText: "Paracetamol" })).toHaveClass(
+    /cooldown/
+  );
+
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("medications"))
+  );
+  expect(stored).toHaveLength(2);
+  expect(stored.map((medication) => medication.name).sort()).toEqual([
+    "Ibuprofen",
+    "Paracetamol",
+  ]);
+});
+
+test("deleting the last remaining medication returns the app to the MED-6 empty state, with the FAB still visible and usable (MED-12 AC8)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  await page.getByRole("button", { name: "Delete Aspirin" }).click();
+
+  await expect(
+    page.getByText("No medications yet — add one to get started.")
+  ).toBeVisible();
+  await expect(page.locator("#medication-list")).toBeHidden();
+
+  const fab = page.locator("#add-medication-fab");
+  await expect(fab).toBeVisible();
+
+  // "usable", not just visible: adding a fresh medication through it must
+  // still work after the list has emptied out.
+  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+  await expect(page.getByText("Ibuprofen — 200mg")).toBeVisible();
+});
+
+test("the Delete control can be activated by keyboard alone, via both Enter and Space (MED-12 AC9)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+
+  const addTrigger = page.locator("#add-medication-fab");
+  // Explicitly (re-)focus the trigger, then confirm it landed, before moving
+  // focus elsewhere and acting on it — per this repo's established
+  // Playwright focus-race pattern (see the MED-22 multi-add tab-order test
+  // for the same technique). Two back-to-back adds each queue their own
+  // async dialog close-driven `trigger.focus()`; merely asserting the
+  // trigger is *already* focused (without this explicit call) can pass on
+  // the first of those two events and then flake when the second lands
+  // moments later, stealing focus back after this test has already moved on.
+  await addTrigger.focus();
+  await expect(addTrigger).toBeFocused();
+
+  const deleteAspirin = page.getByRole("button", { name: "Delete Aspirin" });
+  await deleteAspirin.focus();
+  await expect(deleteAspirin).toBeFocused();
+  await page.keyboard.press("Enter");
+
+  await expect(page.getByText("Aspirin — 100mg")).toBeHidden();
+  await expect(page.getByText("Ibuprofen — 200mg")).toBeVisible();
+
+  const deleteIbuprofen = page.getByRole("button", { name: "Delete Ibuprofen" });
+  await deleteIbuprofen.focus();
+  await expect(deleteIbuprofen).toBeFocused();
+  await page.keyboard.press(" ");
+
+  await expect(page.getByText("Ibuprofen — 200mg")).toBeHidden();
+  await expect(
+    page.getByText("No medications yet — add one to get started.")
+  ).toBeVisible();
+});
+
+test("keyboard focus moves to the next row's Delete button after deleting a middle item, not the Add-medication trigger (MED-12 review, keyboard efficiency)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+  await addMedicationViaUi(page, { name: "Paracetamol", dose: "500mg", interval: "4" });
+
+  // Settle the trailing add's own dialog-close-driven `trigger.focus()`
+  // before moving focus elsewhere — this repo's established Playwright
+  // focus-race pattern (see the "activated by keyboard alone" test above) —
+  // otherwise that pending async refocus can steal focus back right as the
+  // assertion below runs.
+  const addTrigger = page.locator("#add-medication-fab");
+  await addTrigger.focus();
+  await expect(addTrigger).toBeFocused();
+
+  const deleteIbuprofen = page.getByRole("button", { name: "Delete Ibuprofen" });
+  await deleteIbuprofen.focus();
+  await expect(deleteIbuprofen).toBeFocused();
+  await deleteIbuprofen.click();
+
+  await expect(page.getByText("Ibuprofen — 200mg")).toBeHidden();
+  // Paracetamol shifted up into the deleted row's position — focus should
+  // land on its Delete button, not be teleported back to the FAB at the top
+  // of the tab order.
+  await expect(page.getByRole("button", { name: "Delete Paracetamol" })).toBeFocused();
+});
+
+test("keyboard focus moves to the previous row's Delete button after deleting the last item in a multi-item list", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+
+  // Settle the trailing add's own dialog-close-driven `trigger.focus()`
+  // before moving focus elsewhere (see this repo's established Playwright
+  // focus-race pattern, used above in the "middle item" test).
+  const addTrigger = page.locator("#add-medication-fab");
+  await addTrigger.focus();
+  await expect(addTrigger).toBeFocused();
+
+  const deleteIbuprofen = page.getByRole("button", { name: "Delete Ibuprofen" });
+  await deleteIbuprofen.focus();
+  await expect(deleteIbuprofen).toBeFocused();
+  await deleteIbuprofen.click();
+
+  await expect(page.getByText("Ibuprofen — 200mg")).toBeHidden();
+  // No row shifted up into the deleted (last) row's old position, so focus
+  // falls back to the new last row, Aspirin, instead.
+  await expect(page.getByRole("button", { name: "Delete Aspirin" })).toBeFocused();
+});
+
+test("keyboard focus moves to the Add-medication trigger after deleting the last remaining medication (MED-12 AC8, genuine empty-state case)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const addTrigger = page.locator("#add-medication-fab");
+  // See the comment in the "activated by keyboard alone" test above for why
+  // this is an explicit `.focus()`, not just an assertion, after an add.
+  await addTrigger.focus();
+  await expect(addTrigger).toBeFocused();
+
+  const deleteButton = page.getByRole("button", { name: "Delete Aspirin" });
+  await deleteButton.focus();
+  await expect(deleteButton).toBeFocused();
+  await deleteButton.click();
+
+  await expect(page.getByText("Aspirin — 100mg")).toBeHidden();
+  // The list is now genuinely empty — the FAB is the only focusable control
+  // left, and is the correct AC8 target.
+  await expect(addTrigger).toBeFocused();
+});

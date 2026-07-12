@@ -4,6 +4,7 @@ import {
   addMedication,
   updateMedicationInterval,
   updateMedicationDetails,
+  removeMedication,
   logDose,
   stopCooldown,
   isInCooldown,
@@ -158,18 +159,18 @@ function renderMedicationItem(medication) {
   doseEl.textContent = medication.dose;
 
   // Grouped in their own element (rather than appended straight into
-  // `header`) so `header` has exactly two flex children — this group and the
-  // Edit button — and `justify-content: space-between` pushes just those two
-  // apart instead of spreading name/separator/dose/button all independently.
+  // `header`) so `header` has exactly two flex children — this group and
+  // `.header-actions` below — and `justify-content: space-between` pushes
+  // just those two apart instead of spreading name/separator/dose/buttons
+  // all independently.
   const titleGroup = document.createElement("span");
   titleGroup.className = "medication-title";
   titleGroup.append(nameEl, " — ", doseEl);
 
   // MED-17: per-card Edit trigger — the first per-card secondary-action icon
-  // button in the app (no MED-12 delete control exists yet to sit alongside
-  // it). Accessible name identifies the medication, not just "Edit" (mirrors
-  // GO/Stop's own per-row aria-label discipline), and it's a plain <button>
-  // so it's keyboard-reachable/operable for free.
+  // button in the app. Accessible name identifies the medication, not just
+  // "Edit" (mirrors GO/Stop's own per-row aria-label discipline), and it's a
+  // plain <button> so it's keyboard-reachable/operable for free.
   const editButton = document.createElement("button");
   editButton.type = "button";
   editButton.className = "icon-btn edit";
@@ -177,7 +178,28 @@ function renderMedicationItem(medication) {
   editButton.setAttribute("aria-label", `Edit ${medication.name}`);
   editButton.addEventListener("click", () => openEditDialog(medication));
 
-  header.append(titleGroup, editButton);
+  // MED-12: per-card Delete trigger, reusing the `.icon-btn` base class
+  // MED-17's Edit control established (per the 2026-07-10 Jira comment on
+  // MED-12) and layering its own `--danger` hover color on top. Deletes
+  // immediately on activation — no confirmation dialog, no undo, both
+  // deliberate product decisions (see MED-12 AC3/AC4) — so unlike Edit this
+  // button owns no dialog and its click handler goes straight to deletion.
+  const deleteButton = document.createElement("button");
+  deleteButton.type = "button";
+  deleteButton.className = "icon-btn delete";
+  deleteButton.textContent = "×";
+  deleteButton.setAttribute("aria-label", `Delete ${medication.name}`);
+  deleteButton.addEventListener("click", () => handleDelete(medication));
+
+  const deleteError = document.createElement("p");
+  deleteError.className = "form-error row-error delete-error";
+  deleteError.setAttribute("role", "alert");
+
+  const headerActions = document.createElement("div");
+  headerActions.className = "header-actions";
+  headerActions.append(editButton, deleteButton);
+
+  header.append(titleGroup, headerActions);
 
   const pill = document.createElement("span");
   pill.className = "pill";
@@ -280,7 +302,16 @@ function renderMedicationItem(medication) {
   countdownEl.className = "cooldown-countdown";
   countdownEl.hidden = true;
 
-  const refs = { item, pill, goButton, countdownEl, stopButton, editButton };
+  const refs = {
+    item,
+    pill,
+    goButton,
+    countdownEl,
+    stopButton,
+    editButton,
+    deleteButton,
+    deleteError,
+  };
   cooldownRefs.set(medication.id, refs);
   updateCooldownDisplay(medication, refs);
 
@@ -360,8 +391,87 @@ function renderMedicationItem(medication) {
   actions.className = "actions";
   actions.append(goButton, stopButton);
 
-  item.append(header, pill, countdownEl, intervalField, rowError, actions, goError, stopError);
+  item.append(
+    header,
+    pill,
+    countdownEl,
+    intervalField,
+    rowError,
+    actions,
+    goError,
+    stopError,
+    deleteError
+  );
   return item;
+}
+
+// --- MED-12: delete a medication ----------------------------------------
+
+// Deletes `medication` immediately on activation — no confirmation dialog,
+// no undo, both deliberate product decisions (MED-12 AC3/AC4), so unlike
+// Edit this control owns no dialog and goes straight from click to
+// deletion. Mirrors the storage-failure discipline GO/Stop/Edit already
+// established: the in-memory list and the rendered list are only updated
+// after `saveMedications` succeeds, so a storage failure never lets the UI
+// imply a deletion that wasn't actually persisted. `removeMedication` itself
+// filters by id with no branching on cooldown status, so a Cooldown
+// medication's countdown/timestamp data is discarded the same way an
+// Active medication's is (AC6), and every other medication is left
+// completely untouched (AC7).
+function handleDelete(medication) {
+  // Reset at the top, before the attempt, like errorEl/editErrorEl's own
+  // reset-at-start convention — otherwise a stale error from a previous
+  // failed delete of this same row would still be showing right up until
+  // (or, on a second failure, indistinguishably alongside) this attempt's
+  // own result.
+  const staleRefs = cooldownRefs.get(medication.id);
+  if (staleRefs) {
+    staleRefs.deleteError.textContent = "";
+  }
+
+  // Captured before removal: the deleted row's position in the *current*
+  // list, used below to pick a focus target that's still near where the
+  // user was working, rather than always jumping to the FAB.
+  const deletedIndex = medications.findIndex((entry) => entry.id === medication.id);
+  const remaining = removeMedication(medications, medication.id);
+  try {
+    saveMedications(remaining, window.localStorage);
+  } catch {
+    const refs = cooldownRefs.get(medication.id);
+    if (refs) {
+      refs.deleteError.textContent = "Could not delete — please try again.";
+    }
+    return;
+  }
+  medications = remaining;
+  render();
+
+  // Focus goes to whichever row now occupies the deleted row's old spot
+  // (the next row, shifted up) — or, if the deleted row was last, to the
+  // new last row instead — so a keyboard user working down the list can
+  // keep deleting/tabbing from roughly where they were, rather than being
+  // sent all the way back to the FAB at the top of the tab order (MED-12
+  // review, 2026-07-12). The FAB is only the correct target for the
+  // genuine AC8 case: the list is now completely empty and there is no
+  // row left to focus.
+  if (remaining.length === 0) {
+    trigger.focus();
+  } else {
+    const nextFocusIndex = Math.min(deletedIndex, remaining.length - 1);
+    const nextFocusRefs = cooldownRefs.get(remaining[nextFocusIndex].id);
+    // Falls back to the FAB only if something unexpected left `cooldownRefs`
+    // without an entry for that row — should never happen given `render()`
+    // just repopulated it for every surviving medication, but keyboard focus
+    // must land *somewhere* deterministic rather than silently falling
+    // through to <body>.
+    if (nextFocusRefs) {
+      nextFocusRefs.deleteButton.focus();
+    } else {
+      trigger.focus();
+    }
+  }
+
+  statusAnnouncer.textContent = `${medication.name} deleted.`;
 }
 
 function openAddDialog() {

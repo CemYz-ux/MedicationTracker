@@ -371,11 +371,11 @@ button:hover {
 }
 
 /* Small icon-button convention for per-card secondary actions in the header
-   (first one: Edit, MED-17). Deliberately neutral at rest, like the dialog's
-   own close control; a future delete control (MED-12) can reuse `.icon-btn`
-   and layer its own hover color the way `.icon-btn.edit` does below, rather
-   than sharing this one (edit isn't a destructive action, so it shouldn't
-   hover to `--danger` the way a delete control likely should). */
+   (Edit, MED-17; Delete, MED-12). Deliberately neutral at rest, like the
+   dialog's own close control, with each action layering its own hover color
+   on top of this shared base rather than each inventing a parallel
+   convention (edit isn't destructive, so it hovers to `--go`; delete is, so
+   it hovers to `--danger`). */
 .icon-btn {
   background: transparent;
   color: var(--ink-soft);
@@ -392,6 +392,21 @@ button:hover {
 
 .icon-btn.edit:hover {
   color: var(--go);
+}
+
+.icon-btn.delete:hover {
+  color: var(--danger);
+}
+
+/* Groups the per-card Edit and Delete icon-buttons so `.medication-header`
+   still has exactly two flex children (this group and `.medication-title`)
+   — `justify-content: space-between` on the header pushes just those two
+   apart, rather than spreading three+ items independently. */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex-shrink: 0;
 }
 
 .medication-name {
