@@ -17,6 +17,7 @@ import {
   getCooldownProgress,
   formatDuration,
   formatCountdown,
+  formatCurrentDate,
 } from "../../js/medications.js";
 
 function createMemoryStorage() {
@@ -892,5 +893,18 @@ describe("formatCountdown", () => {
       lastTakenAt: null,
     };
     expect(formatCountdown(med, Date.now())).toBeNull();
+  });
+});
+
+describe("formatCurrentDate", () => {
+  it('formats a date as "Weekday, Month Day"', () => {
+    // 2026-07-12 is a Sunday. Use noon UTC so no timezone the CI runner
+    // might be in shifts it to an adjacent calendar day.
+    const date = new Date("2026-07-12T12:00:00.000Z");
+    expect(formatCurrentDate(date)).toBe("Sunday, July 12");
+  });
+
+  it("defaults to the current date when called with no argument", () => {
+    expect(formatCurrentDate()).toBe(formatCurrentDate(new Date()));
   });
 });

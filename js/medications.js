@@ -319,3 +319,18 @@ export function formatCountdown(medication, now = Date.now()) {
   const total = formatDuration(getCooldownTotalMs(medication));
   return `${remaining} of ${total} remaining`;
 }
+
+/**
+ * Formats a date as a locale-aware "Weekday, Month Day" string, e.g. "Sunday,
+ * July 12" — used in place of the static "Your medications" heading so the
+ * grey list card orients the user to the day it's showing. Defaults to
+ * "now" but accepts an explicit `date` so it stays pure/testable rather than
+ * reaching for `new Date()` itself.
+ */
+export function formatCurrentDate(date = new Date()) {
+  return date.toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+}

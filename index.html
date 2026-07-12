@@ -7,11 +7,6 @@
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-  <header>
-    <h1>Medication Tracker</h1>
-    <p>Keep track of the medications you take, their dose, and how often to take them.</p>
-  </header>
-
   <!-- MED-23: floating action button, replacing the old top-center
        add-medication bar/trigger. Bare "+" glyph + aria-label mirrors the
        app's existing bare-glyph-plus-aria-label pattern already used by
@@ -80,7 +75,7 @@
     </dialog>
 
     <section aria-labelledby="medication-list-heading">
-      <h2 id="medication-list-heading">Your medications</h2>
+      <h1 id="medication-list-heading"></h1>
       <p id="empty-state">No medications yet — add one to get started.</p>
       <ul id="medication-list" class="medication-list" hidden></ul>
     </section>
@@ -90,10 +85,6 @@
        logged dose) to screen readers; errors already have their own
        visible, per-row role="alert" elements so they don't need this. -->
   <p id="status-announcer" class="visually-hidden" role="status" aria-live="polite"></p>
-
-  <footer>
-    <p>Data is stored only in your browser. Nothing is sent to a server.</p>
-  </footer>
 
   <script type="module" src="js/app.js"></script>
 </body>
