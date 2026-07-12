@@ -293,7 +293,8 @@ test("after a successful interval edit, a later invalid edit retains the newly s
 });
 
 async function addMedicationViaUi(page, { name, dose, interval }) {
-  await page.locator("#add-medication-fab").click();
+  const trigger = page.locator("#add-medication-fab");
+  await trigger.click();
 
   // Scoped to the dialog: once a medication row already exists in the list,
   // its own "Interval (hours)" field would otherwise also match
@@ -302,7 +303,46 @@ async function addMedicationViaUi(page, { name, dose, interval }) {
   await dialog.getByLabel("Name").fill(name);
   await dialog.getByLabel("Dose").fill(dose);
   await dialog.getByLabel("Interval (hours)").fill(interval);
+
+  // Register a listener for the dialog's native `close` event *before*
+  // triggering it below, so there's no window in which the event could fire
+  // (and be missed) before we start waiting on it. Stashed on `window`
+  // rather than awaited directly, since we can't await a promise that only
+  // resolves once we've gone on to cause the event in the first place.
+  await page.evaluate(() => {
+    window.__addDialogClosed = new Promise((resolve) => {
+      document
+        .getElementById("add-medication-dialog")
+        .addEventListener("close", resolve, { once: true });
+    });
+  });
+
   await dialog.getByRole("button", { name: "Add medication", exact: true }).click();
+
+  // Closing a modal <dialog> actually moves focus back to the trigger via
+  // *two* separate mechanisms, not one: (1) the browser's own native
+  // "restore focus to whatever had focus before the dialog opened" step,
+  // which runs synchronously inside dialog.close() itself, and (2) this
+  // app's own "close" event listener (js/app.js), which explicitly calls
+  // trigger.focus() again — but that listener only runs on the *later*
+  // queued task the HTML spec dispatches "close" on, not synchronously.
+  //
+  // Waiting for the trigger to merely *appear* focused (e.g. polling
+  // toBeFocused()) is satisfied by the first, native restoration and
+  // returns too early: the second, explicit trigger.focus() call is still
+  // queued at that point and can steal focus back later, right as a caller
+  // is moving focus elsewhere for its own assertions. Confirmed by
+  // instrumenting js/app.js's focus calls under --workers=2 load: the
+  // trigger observably regains focus ~10ms *before* the "close" event even
+  // fires.
+  //
+  // Waiting for the actual "close" event to finish firing is the real fix:
+  // JS is single-threaded, so once our listener above (registered before
+  // the app's own, so it always runs after it — same-element listeners
+  // fire in registration order) has resolved, the app's own close handler
+  // and its trigger.focus() call — its last statement — are guaranteed to
+  // have already completed. Nothing more is left queued to steal focus.
+  await page.evaluate(() => window.__addDialogClosed);
 }
 
 test("pressing GO records the current timestamp, persists it, and disables that medication's GO button", async ({
@@ -313,9 +353,17 @@ test("pressing GO records the current timestamp, persists it, and disables that 
   const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
   await expect(goButton).toBeEnabled();
 
-  const before = Date.now();
+  // Bracket with the browser's own clock, not Node's: comparing a Node-side
+  // Date.now() against a timestamp recorded inside the page mixes two
+  // different clocks across a process boundary, and the CDP round-trip
+  // latency around the click can exceed the real gap between them —
+  // exactly the kind of tight cross-process timing assumption that gets
+  // less reliable, not more, under heavier concurrent load (e.g.
+  // --workers=2). Reading both bounds from the page keeps the whole
+  // comparison on one clock.
+  const before = await page.evaluate(() => Date.now());
   await goButton.click();
-  const after = Date.now();
+  const after = await page.evaluate(() => Date.now());
 
   await expect(goButton).toBeDisabled();
 
@@ -387,12 +435,9 @@ test("pressing GO via keyboard keeps focus in place instead of teleporting it to
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
   const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
+  // addMedicationViaUi already waits for the dialog-close refocus to settle
+  // before returning, so the trigger is guaranteed focused here.
   const addTrigger = page.locator("#add-medication-fab");
-
-  // The add-medication flow itself returns focus to addTrigger once the
-  // dialog finishes closing; wait for that settle before deliberately
-  // moving focus to the GO button, so the assertion below isn't racing it.
-  await expect(addTrigger).toBeFocused();
 
   await goButton.focus();
   await expect(goButton).toBeFocused();
@@ -504,13 +549,8 @@ test("pressing Enter a second time on an already-cooldown GO button does not rec
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
   const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
-  const addTrigger = page.locator("#add-medication-fab");
-
-  // The add-medication flow itself returns focus to addTrigger once the
-  // dialog finishes closing; wait for that settle before deliberately
-  // moving focus to the GO button, so the keyboard press below isn't racing
-  // that async refocus on a slower CI runner.
-  await expect(addTrigger).toBeFocused();
+  // addMedicationViaUi already waits for the dialog-close refocus to settle
+  // before returning, so no extra wait is needed before moving focus here.
 
   await goButton.focus();
   await expect(goButton).toBeFocused();
@@ -811,13 +851,9 @@ test("pressing Stop moves focus to the now-enabled GO button, not somewhere unre
 
   const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
   const stopButton = page.getByRole("button", { name: "Stop — cancel Aspirin cooldown" });
+  // addMedicationViaUi already waits for the dialog-close refocus to settle
+  // before returning, so the trigger is guaranteed focused here.
   const addTrigger = page.locator("#add-medication-fab");
-
-  // The add-medication flow itself returns focus to addTrigger once the
-  // dialog finishes closing; wait for that settle before driving our own
-  // keyboard/focus assertions, so this test isn't racing it on a slower CI
-  // runner (the same flake root cause seen on MED-7/MED-8).
-  await expect(addTrigger).toBeFocused();
 
   await goButton.click();
   await expect(stopButton).toBeVisible();
@@ -1761,18 +1797,6 @@ test("the Delete control can be activated by keyboard alone, via both Enter and 
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
   await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
 
-  const addTrigger = page.locator("#add-medication-fab");
-  // Explicitly (re-)focus the trigger, then confirm it landed, before moving
-  // focus elsewhere and acting on it — per this repo's established
-  // Playwright focus-race pattern (see the MED-22 multi-add tab-order test
-  // for the same technique). Two back-to-back adds each queue their own
-  // async dialog close-driven `trigger.focus()`; merely asserting the
-  // trigger is *already* focused (without this explicit call) can pass on
-  // the first of those two events and then flake when the second lands
-  // moments later, stealing focus back after this test has already moved on.
-  await addTrigger.focus();
-  await expect(addTrigger).toBeFocused();
-
   const deleteAspirin = page.getByRole("button", { name: "Delete Aspirin" });
   await deleteAspirin.focus();
   await expect(deleteAspirin).toBeFocused();
@@ -1799,15 +1823,6 @@ test("keyboard focus moves to the next row's Delete button after deleting a midd
   await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
   await addMedicationViaUi(page, { name: "Paracetamol", dose: "500mg", interval: "4" });
 
-  // Settle the trailing add's own dialog-close-driven `trigger.focus()`
-  // before moving focus elsewhere — this repo's established Playwright
-  // focus-race pattern (see the "activated by keyboard alone" test above) —
-  // otherwise that pending async refocus can steal focus back right as the
-  // assertion below runs.
-  const addTrigger = page.locator("#add-medication-fab");
-  await addTrigger.focus();
-  await expect(addTrigger).toBeFocused();
-
   const deleteIbuprofen = page.getByRole("button", { name: "Delete Ibuprofen" });
   await deleteIbuprofen.focus();
   await expect(deleteIbuprofen).toBeFocused();
@@ -1826,13 +1841,6 @@ test("keyboard focus moves to the previous row's Delete button after deleting th
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
   await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
 
-  // Settle the trailing add's own dialog-close-driven `trigger.focus()`
-  // before moving focus elsewhere (see this repo's established Playwright
-  // focus-race pattern, used above in the "middle item" test).
-  const addTrigger = page.locator("#add-medication-fab");
-  await addTrigger.focus();
-  await expect(addTrigger).toBeFocused();
-
   const deleteIbuprofen = page.getByRole("button", { name: "Delete Ibuprofen" });
   await deleteIbuprofen.focus();
   await expect(deleteIbuprofen).toBeFocused();
@@ -1849,11 +1857,9 @@ test("keyboard focus moves to the Add-medication trigger after deleting the last
 }) => {
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
+  // addMedicationViaUi waits for its own dialog-close refocus to settle
+  // before returning, so the trigger is guaranteed focused here.
   const addTrigger = page.locator("#add-medication-fab");
-  // See the comment in the "activated by keyboard alone" test above for why
-  // this is an explicit `.focus()`, not just an assertion, after an add.
-  await addTrigger.focus();
-  await expect(addTrigger).toBeFocused();
 
   const deleteButton = page.getByRole("button", { name: "Delete Aspirin" });
   await deleteButton.focus();
