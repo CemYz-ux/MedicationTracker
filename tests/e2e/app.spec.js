@@ -97,6 +97,30 @@ test("adds a valid medication and shows it in the list", async ({ page }) => {
   await expect(page.getByText("No medications yet — add one to get started.")).toBeHidden();
 });
 
+test("the Add dialog's fields are reset (not just hidden) after a successful submit, so a later add doesn't leak stale values (MED-15)", async ({
+  page,
+}) => {
+  await page.locator("#add-medication-fab").click();
+  const dialog = page.locator("#add-medication-dialog");
+  await dialog.getByLabel("Name").fill("Aspirin");
+  await dialog.getByLabel("Dose").fill("100mg");
+  await dialog.getByLabel("Interval (hours)").fill("8");
+  await dialog.getByRole("button", { name: "Add medication", exact: true }).click();
+
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
+
+  await page.locator("#add-medication-fab").click();
+
+  // Reopen and check the fields directly, without filling them first —
+  // filling would mask the exact regression (MED-15) this test guards
+  // against: stale values from the prior submit leaking into the reopened
+  // form because it was hidden via dialog.close() without form.reset().
+  await expect(dialog.getByLabel("Name")).toHaveValue("");
+  await expect(dialog.getByLabel("Dose")).toHaveValue("");
+  await expect(dialog.getByLabel("Interval (hours)")).toHaveValue("");
+});
+
 test("shows a validation error and keeps the modal open when fields are empty", async ({
   page,
 }) => {
