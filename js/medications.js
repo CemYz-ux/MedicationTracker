@@ -289,33 +289,81 @@ export function getCooldownProgress(medication, now = Date.now()) {
 
 /**
  * Formats a non-negative duration in milliseconds as a short human-readable
- * string ("3h 12m", "45m", or "5h" when the minutes component is zero).
- * Rounds up to the nearest minute (`Math.ceil`) rather than truncating, so a
- * still-running countdown never displays a misleading "0m" in its final
- * seconds.
+ * string. Two precisions are supported:
+ *
+ * - Default (`includeSeconds: false`): hours/minutes only — "3h 12m", "45m",
+ *   or "5h" when the minutes component is zero. Rounds up to the nearest
+ *   minute (`Math.ceil`) rather than truncating, so a still-running duration
+ *   never displays a misleading "0m" in its final seconds. This is what the
+ *   *total* portion of `formatCountdown` uses (MED-8) — it's a static label,
+ *   not a live-updating value, so second-level precision there would just be
+ *   noise (MED-29 AC).
+ * - `includeSeconds: true`: hours/minutes/seconds, exact to the second —
+ *   "3h 12m 45s", "12m 45s", or "45s". Rounds up to the nearest second
+ *   (`Math.ceil`), the same discipline as the minute-rounded default, one
+ *   level finer. This is what the *remaining* portion of `formatCountdown`
+ *   uses (MED-29), so the seconds digit genuinely counts down live.
+ *
+ * Zero-value components are omitted from both ends: leading zero components
+ * (largest units) are dropped entirely, and trailing zero components
+ * (smallest units) are dropped too — but at least one component is always
+ * kept, so a fully-elapsed duration still renders ("0m" / "0s") rather than
+ * an empty string. A zero component *between* two non-zero components (e.g.
+ * 3h 0m 45s) is kept, since it isn't part of either the leading or trailing
+ * zero run.
  */
-export function formatDuration(ms) {
-  const totalMinutes = Math.max(0, Math.ceil(ms / 60000));
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours === 0) return `${minutes}m`;
-  if (minutes === 0) return `${hours}h`;
-  return `${hours}h ${minutes}m`;
+export function formatDuration(ms, { includeSeconds = false } = {}) {
+  if (!includeSeconds) {
+    const totalMinutes = Math.max(0, Math.ceil(ms / 60000));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours === 0) return `${minutes}m`;
+    if (minutes === 0) return `${hours}h`;
+    return `${hours}h ${minutes}m`;
+  }
+
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const units = [
+    { value: hours, suffix: "h" },
+    { value: minutes, suffix: "m" },
+    { value: seconds, suffix: "s" },
+  ];
+
+  let start = 0;
+  while (start < units.length - 1 && units[start].value === 0) start++;
+  let end = units.length - 1;
+  while (end > start && units[end].value === 0) end--;
+
+  return units
+    .slice(start, end + 1)
+    .map((unit) => `${unit.value}${unit.suffix}`)
+    .join(" ");
 }
 
 /**
- * The countdown text shown on a cooldown card, e.g. "3h 12m of 5h
- * remaining" — remaining time, then the total interval that was active when
- * GO was pressed (per `getCooldownTotalMs`). Returns `null` when the
- * medication is not currently in cooldown, so callers know not to render it.
+ * The countdown text shown on a cooldown card, e.g. "3h 12m 45s of 5h
+ * remaining" — remaining time (exact to the second, MED-29), then the total
+ * interval that was active when GO was pressed (per `getCooldownTotalMs`,
+ * unchanged minute precision — MED-29 AC deliberately keeps the total a
+ * static, non-live-ticking label). Returns `null` when the medication is not
+ * currently in cooldown, so callers know not to render it.
  *
  * Format confirmed by product owner on 2026-07-09 (MED-8 ticket comment):
  * "{remaining} of {total} remaining", not the bare "{remaining} remaining"
- * wording in the story's acceptance-criteria text.
+ * wording in the story's acceptance-criteria text. MED-29 (2026-07-12) added
+ * the seconds component to the remaining portion only, and dropped
+ * `COOLDOWN_TICK_MS` (`js/app.js`) from 30s to ~1s so this text — and the
+ * card's `--progress` fill — genuinely tick live rather than sitting frozen
+ * for up to 29s between refreshes.
  */
 export function formatCountdown(medication, now = Date.now()) {
   if (!isInCooldown(medication, now)) return null;
-  const remaining = formatDuration(getCooldownRemainingMs(medication, now));
+  const remaining = formatDuration(getCooldownRemainingMs(medication, now), {
+    includeSeconds: true,
+  });
   const total = formatDuration(getCooldownTotalMs(medication));
   return `${remaining} of ${total} remaining`;
 }

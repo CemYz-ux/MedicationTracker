@@ -14,11 +14,14 @@ import {
 } from "./medications.js";
 
 // How often the periodic re-check re-evaluates every medication's cooldown
-// state (countdown text, fill, GO enablement). The AC requires the
-// countdown text to refresh at least once a minute and reactivation to
-// happen within roughly 30-60s of the actual elapse moment; a 30s cadence
-// comfortably satisfies both without excessive DOM churn for a small list.
-const COOLDOWN_TICK_MS = 30_000;
+// state (countdown text, fill, GO enablement). Dropped from 30s to ~1s in
+// MED-29 (product decision, 2026-07-12 ticket comment) so the countdown's
+// seconds component genuinely ticks live instead of sitting frozen for up to
+// 29s and then jumping. `updateCooldownDisplay` only touches the specific
+// card's countdown text and `--progress` custom property — never a full
+// list re-render — so the ~30x increase in re-renders/minute per cooldown
+// card is cheap at this app's scale (accepted trade-off, MED-29).
+const COOLDOWN_TICK_MS = 1_000;
 
 const trigger = document.getElementById("add-medication-fab");
 const dialog = document.getElementById("add-medication-dialog");
