@@ -419,6 +419,20 @@ function renderMedicationItem(medication) {
 // Active medication's is (AC6), and every other medication is left
 // completely untouched (AC7).
 function handleDelete(medication) {
+  // Reset at the top, before the attempt, like errorEl/editErrorEl's own
+  // reset-at-start convention — otherwise a stale error from a previous
+  // failed delete of this same row would still be showing right up until
+  // (or, on a second failure, indistinguishably alongside) this attempt's
+  // own result.
+  const staleRefs = cooldownRefs.get(medication.id);
+  if (staleRefs) {
+    staleRefs.deleteError.textContent = "";
+  }
+
+  // Captured before removal: the deleted row's position in the *current*
+  // list, used below to pick a focus target that's still near where the
+  // user was working, rather than always jumping to the FAB.
+  const deletedIndex = medications.findIndex((entry) => entry.id === medication.id);
   const remaining = removeMedication(medications, medication.id);
   try {
     saveMedications(remaining, window.localStorage);
@@ -431,13 +445,32 @@ function handleDelete(medication) {
   }
   medications = remaining;
   render();
-  // The deleted row (and its own Edit/Delete controls) is now gone from the
-  // DOM entirely, unlike GO/Stop which stay in place and can just re-focus
-  // themselves — the trigger is the one control guaranteed to still exist
-  // after this render, whether or not any medications remain (AC8), so
-  // keyboard focus lands there deterministically instead of silently
-  // falling through to <body>.
-  trigger.focus();
+
+  // Focus goes to whichever row now occupies the deleted row's old spot
+  // (the next row, shifted up) — or, if the deleted row was last, to the
+  // new last row instead — so a keyboard user working down the list can
+  // keep deleting/tabbing from roughly where they were, rather than being
+  // sent all the way back to the FAB at the top of the tab order (MED-12
+  // review, 2026-07-12). The FAB is only the correct target for the
+  // genuine AC8 case: the list is now completely empty and there is no
+  // row left to focus.
+  if (remaining.length === 0) {
+    trigger.focus();
+  } else {
+    const nextFocusIndex = Math.min(deletedIndex, remaining.length - 1);
+    const nextFocusRefs = cooldownRefs.get(remaining[nextFocusIndex].id);
+    // Falls back to the FAB only if something unexpected left `cooldownRefs`
+    // without an entry for that row — should never happen given `render()`
+    // just repopulated it for every surviving medication, but keyboard focus
+    // must land *somewhere* deterministic rather than silently falling
+    // through to <body>.
+    if (nextFocusRefs) {
+      nextFocusRefs.deleteButton.focus();
+    } else {
+      trigger.focus();
+    }
+  }
+
   statusAnnouncer.textContent = `${medication.name} deleted.`;
 }
 
