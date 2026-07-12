@@ -866,10 +866,53 @@ describe("formatDuration", () => {
   it("clamps negative durations to zero", () => {
     expect(formatDuration(-1000)).toBe("0m");
   });
+
+  // MED-29: `includeSeconds: true` is what `formatCountdown` uses for the
+  // *remaining* portion of the countdown text — exact-second precision, with
+  // zero-value components omitted from both ends the same way the default
+  // hours/minutes format already omits a zero-hours or zero-minutes
+  // component, extended one level down for seconds.
+  describe("with includeSeconds: true", () => {
+    it("formats hours, minutes, and seconds together", () => {
+      const ms = (3 * 3600 + 12 * 60 + 45) * 1000;
+      expect(formatDuration(ms, { includeSeconds: true })).toBe("3h 12m 45s");
+    });
+
+    it("omits the hours component when under an hour remains", () => {
+      const ms = (12 * 60 + 45) * 1000;
+      expect(formatDuration(ms, { includeSeconds: true })).toBe("12m 45s");
+    });
+
+    it("omits both hours and minutes when under a minute remains", () => {
+      expect(formatDuration(45 * 1000, { includeSeconds: true })).toBe("45s");
+    });
+
+    it("omits a trailing zero-minutes-and-seconds pair on an exact hour boundary", () => {
+      expect(formatDuration(8 * 3600 * 1000, { includeSeconds: true })).toBe("8h");
+    });
+
+    it("omits a trailing zero-seconds component on an exact minute boundary", () => {
+      expect(formatDuration(5 * 60 * 1000, { includeSeconds: true })).toBe("5m");
+    });
+
+    it("keeps a zero-minutes component that sits between non-zero hours and seconds", () => {
+      const ms = (3 * 3600 + 45) * 1000; // 3h 0m 45s
+      expect(formatDuration(ms, { includeSeconds: true })).toBe("3h 0m 45s");
+    });
+
+    it("rounds up to the nearest second rather than truncating", () => {
+      // 44.5 seconds should read as 45s, not 44s.
+      expect(formatDuration(44.5 * 1000, { includeSeconds: true })).toBe("45s");
+    });
+
+    it("clamps negative durations to zero", () => {
+      expect(formatDuration(-1000, { includeSeconds: true })).toBe("0s");
+    });
+  });
 });
 
 describe("formatCountdown", () => {
-  it('formats as "{remaining} of {total} remaining" (PO-confirmed wording)', () => {
+  it('formats as "{remaining} of {total} remaining" with seconds in the remaining portion only (MED-29)', () => {
     const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
     const med = {
       id: "1",
@@ -879,8 +922,39 @@ describe("formatCountdown", () => {
       cooldownIntervalHours: 5,
       lastTakenAt: new Date(takenAt).toISOString(),
     };
-    const now = takenAt + (1 * 60 + 48) * 60 * 1000; // 1h48m elapsed of 5h
-    expect(formatCountdown(med, now)).toBe("3h 12m of 5h remaining");
+    // 1h47m15s elapsed of 5h leaves exactly 3h12m45s remaining — the
+    // seconds-inclusive example from the MED-29 acceptance criteria. The
+    // total portion ("5h") stays minutes-only, per AC.
+    const now = takenAt + (1 * 3600 + 47 * 60 + 15) * 1000;
+    expect(formatCountdown(med, now)).toBe("3h 12m 45s of 5h remaining");
+  });
+
+  it("omits zero-value components in the remaining portion down to just seconds when under a minute remains", () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const med = {
+      id: "1",
+      name: "Aspirin",
+      dose: "100mg",
+      intervalHours: 1,
+      cooldownIntervalHours: 1,
+      lastTakenAt: new Date(takenAt).toISOString(),
+    };
+    const now = takenAt + (1 * 3600 - 45) * 1000; // 45s left of a 1h cooldown
+    expect(formatCountdown(med, now)).toBe("45s of 1h remaining");
+  });
+
+  it("keeps the total portion at minute precision even when remaining includes seconds", () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const med = {
+      id: "1",
+      name: "Aspirin",
+      dose: "100mg",
+      intervalHours: 5,
+      cooldownIntervalHours: 5,
+      lastTakenAt: new Date(takenAt).toISOString(),
+    };
+    const now = takenAt + 5 * 1000; // 5 seconds elapsed
+    expect(formatCountdown(med, now)).toBe("4h 59m 55s of 5h remaining");
   });
 
   it("returns null when the medication is not in cooldown", () => {

@@ -493,13 +493,21 @@ test("announces a logged dose to assistive tech via a live status region", async
 test("shows a live countdown in '{remaining} of {total} remaining' format after pressing GO, and the fill starts at 100%", async ({
   page,
 }) => {
+  // Fake clock (MED-29): with the periodic re-check now ticking every ~1s
+  // (down from 30s), real wall-clock time could otherwise tick the seconds
+  // component between the click and the assertion below, on a slow CI run.
+  // Installing the fake clock keeps `now` pinned so "8h of 8h remaining" is
+  // deterministic regardless of how long the assertion takes to settle.
+  await page.clock.install();
+  await page.reload();
+
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
   await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
 
-  // Just pressed, so remaining ~= total: both round to "8h" (no minutes
-  // have elapsed yet), giving a deterministic assertion without needing to
-  // fast-forward any clock.
+  // Just pressed, so remaining ~= total: both round to "8h" (no minutes or
+  // seconds have elapsed yet), giving a deterministic assertion without
+  // needing to fast-forward the clock.
   await expect(page.getByText("8h of 8h remaining")).toBeVisible();
 
   const item = page.locator(".medication-item.cooldown");
@@ -509,6 +517,11 @@ test("shows a live countdown in '{remaining} of {total} remaining' format after 
 test("pressing GO does not change the card's height, even though it reveals countdown text (MED-18)", async ({
   page,
 }) => {
+  // Fake clock (MED-29): same reasoning as the test above — pins `now` so
+  // the ~1s periodic re-check can't tick the seconds component mid-test.
+  await page.clock.install();
+  await page.reload();
+
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
   const item = page.locator(".medication-item");
@@ -602,11 +615,13 @@ test("pressing Enter a second time on an already-cooldown GO button does not rec
 test("the fill recedes proportionally to elapsed cooldown time, and reactivation + zero fill happen together", async ({
   page,
 }) => {
-  // Install fake timers before the module (re-)loads, so its setInterval is
-  // registered against the fake clock and can be fast-forwarded
-  // deterministically instead of waiting on real wall-clock time.
-  await page.clock.install();
-  await page.reload();
+  // Install and immediately pin the fake clock before the module (re-)loads,
+  // so its setInterval is registered against the fake clock and time can be
+  // moved forward deterministically instead of racing real wall-clock time
+  // (see `installFrozenClock`/`advanceAndFreeze`, defined below, for why a
+  // bare `install()`/`fastForward()` isn't enough now that the periodic
+  // re-check runs every ~1s instead of 30s — MED-29).
+  await installFrozenClock(page);
 
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
   await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
@@ -616,7 +631,7 @@ test("the fill recedes proportionally to elapsed cooldown time, and reactivation
   await expect(item).toHaveCSS("--progress", "100%");
 
   // Halfway through an 8h interval: left half of the card stays coloured.
-  await page.clock.fastForward(4 * 60 * 60 * 1000);
+  await advanceAndFreeze(page, 4 * 60 * 60 * 1000);
   await expect(item).toHaveCSS("--progress", "50%");
   await expect(page.getByText("4h of 8h remaining")).toBeVisible();
 
@@ -626,7 +641,113 @@ test("the fill recedes proportionally to elapsed cooldown time, and reactivation
   // Past the full interval: the periodic re-check (no reload, no user
   // action) must flip the card back to Active with GO enabled and the fill
   // at exactly 0%, in the same update — never one visibly ahead of the other.
-  await page.clock.fastForward(4 * 60 * 60 * 1000 + 60_000);
+  await advanceAndFreeze(page, 4 * 60 * 60 * 1000 + 60_000);
+  await expect(item).toHaveClass(/active/);
+  await expect(item).not.toHaveClass(/cooldown/);
+  await expect(goButton).toBeEnabled();
+  await expect(item.locator(".cooldown-countdown")).toBeHidden();
+});
+
+// --- MED-29: live seconds in the countdown ------------------------------
+
+// `page.clock.install()` leaves the fake clock *running* — following real
+// wall-clock time 1:1 — until something explicitly pauses it (per
+// Playwright's Clock docs), and `fastForward` jumps forward but then leaves
+// it running again afterward too. At the old 30s tick that was harmless:
+// ordinary Playwright overhead (form-filling, `expect` polling, `evaluate`
+// round-trips) between installing the clock and a later assertion is at
+// most a few hundred real ms, nowhere near enough to cross a 30s tick
+// boundary. MED-29 dropped the tick to ~1s, which *is* within that overhead
+// window — real time leaking into the fake clock lets an extra
+// `runCooldownTick` fire before an assertion settles, showing up as a
+// `--progress` percentage that's slightly (and, across retries,
+// increasingly) off its expected value. `installFrozenClock` pins the clock
+// immediately after install/reload, before any interaction — and
+// `advanceAndFreeze` moves it forward from there using `pauseAt` (which
+// jumps to an absolute instant and then freezes, unlike `fastForward`) — so
+// no real-time drift can leak in anywhere in the test.
+async function installFrozenClock(page) {
+  await page.clock.install();
+  await page.reload();
+  // `pauseAt` rejects a target that's already in the past *at the moment the
+  // call actually executes in the browser* — and there's an unavoidable
+  // round-trip between reading `now` here and that call taking effect,
+  // during which the (still-running, per Playwright's Clock docs) fake
+  // clock keeps advancing in real time. A generous forward buffer absorbs
+  // that round-trip latency; its exact size is inconsequential here since
+  // nothing test-relevant (adding a medication, pressing GO) has happened
+  // yet — this only establishes the frozen baseline everything else in the
+  // test is measured from.
+  const now = await page.evaluate(() => Date.now());
+  const frozenAt = now + 2000;
+  await page.clock.pauseAt(frozenAt);
+  return frozenAt;
+}
+
+async function advanceAndFreeze(page, ms) {
+  const current = await page.evaluate(() => Date.now());
+  await page.clock.pauseAt(current + ms);
+}
+
+test("the countdown's seconds component ticks live once per second, without waiting for a reload", async ({
+  page,
+}) => {
+  // The whole point of MED-29 is that `COOLDOWN_TICK_MS` dropped from 30s to
+  // ~1s so the seconds digit genuinely counts down — this test proves that
+  // cadence, not just the format string.
+  await installFrozenClock(page);
+
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "1" });
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+  await expect(page.getByText("1h of 1h remaining")).toBeVisible();
+
+  await advanceAndFreeze(page, 1000);
+  await expect(page.getByText("59m 59s of 1h remaining")).toBeVisible();
+
+  await advanceAndFreeze(page, 1000);
+  await expect(page.getByText("59m 58s of 1h remaining")).toBeVisible();
+
+  await advanceAndFreeze(page, 1000);
+  await expect(page.getByText("59m 57s of 1h remaining")).toBeVisible();
+});
+
+test("the countdown's fill (--progress) also updates every second, not just every 30s (MED-29)", async ({
+  page,
+}) => {
+  await installFrozenClock(page);
+
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "1" });
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveCSS("--progress", "100%");
+
+  // A 1s tick on a 1h (3600s) interval moves the fill by 1/3600 ≈ 0.0278%.
+  // Advancing 36s (36/3600 = 1%) keeps the arithmetic exact rather than
+  // relying on floating-point rounding at the 1s granularity.
+  await advanceAndFreeze(page, 36 * 1000);
+  await expect(item).toHaveCSS("--progress", "99%");
+});
+
+test("a mid-cooldown reload does not carry the fake-tick cadence past a real reactivation boundary (MED-9/MED-29 regression)", async ({
+  page,
+}) => {
+  // Confirms the tick-rate change (30s -> ~1s) doesn't disturb MED-9's
+  // auto-reactivation: reactivation must still happen automatically via the
+  // periodic tick once the interval elapses, regardless of how often that
+  // tick now runs.
+  await installFrozenClock(page);
+
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "1" });
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+
+  const item = page.locator(".medication-item");
+  const goButton = page.getByRole("button", { name: "GO — log Aspirin taken" });
+  await expect(item).toHaveClass(/cooldown/);
+  await expect(goButton).toBeDisabled();
+
+  await advanceAndFreeze(page, 1 * 60 * 60 * 1000 + 1000);
+
   await expect(item).toHaveClass(/active/);
   await expect(item).not.toHaveClass(/cooldown/);
   await expect(goButton).toBeEnabled();
