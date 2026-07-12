@@ -32,9 +32,22 @@
   box-sizing: border-box;
 }
 
+/* MED-23 AC5 (bugfix, see below): the bottom padding reserves room below
+   *all* page content — not just the medication list — so the fixed FAB
+   (bottom-right, a 1.5rem margin + 3.5rem size = 5rem footprint from the
+   viewport's bottom edge — see .add-medication-fab) never sits on top of
+   whatever renders last on the page once scrolled to the end. Originally
+   this clearance lived on `main`'s padding-bottom, but `<footer>` renders
+   after `</main>`, so that gap sat between the card list and the footer
+   instead of below the footer — the FAB still overlapped the footer's
+   disclaimer text at the true bottom of the page. Applying it to `body`
+   instead guarantees the clearance sits after the last element on the
+   page, whatever that ends up being. 6rem clears the FAB's 5rem footprint
+   with a 1rem buffer to spare (up from the original 3rem general-purpose
+   bottom padding, which this replaces). */
 body {
   margin: 0;
-  padding: 0 1rem 3rem;
+  padding: 0 1rem 6rem;
   max-width: 40rem;
   margin-inline: auto;
   background: var(--paper);
@@ -89,18 +102,6 @@ h1 {
 
 header p {
   color: var(--ink-soft);
-}
-
-/* MED-23 AC5: reserves room below the medication list so the fixed FAB
-   (bottom-right, a 1.5rem margin + 3.5rem size = 5rem footprint from the
-   viewport's bottom edge — see .add-medication-fab) never sits on top of
-   the last row of cards once the page is scrolled to its end. Applied to
-   `main` (which wraps the list's <section>), not left to the footer's
-   incidental margin below it, so the guarantee holds regardless of footer
-   content or how it wraps at a given viewport width. 6rem clears the FAB's
-   5rem footprint with a 1rem buffer to spare. */
-main {
-  padding-bottom: 6rem;
 }
 
 section {

@@ -1498,6 +1498,55 @@ test("the FAB stays fixed in the bottom-right corner while the list is scrolled,
   expect(overlaps).toBe(false);
 });
 
+test("the FAB never overlaps the footer at the true bottom of the page (MED-23 AC5 regression)", async ({
+  page,
+}) => {
+  // Regression test for a bug the code review caught: the AC5 clearance
+  // was originally reserved via padding-bottom on <main>, but <footer>
+  // renders after </main>, so the reserved gap sat between the card list
+  // and the footer instead of below it — the FAB still visually overlapped
+  // the footer's disclaimer text once the page was scrolled all the way
+  // down. Checking only `.medication-item.last()` (as the AC5 test above
+  // does) can't catch this, since the last card was never the problem —
+  // the footer below it was. This test scrolls to the true end of the
+  // page and checks the FAB against the footer's bounding box instead.
+  for (const width of [320, 375, 480, 700]) {
+    await page.setViewportSize({ width, height: 600 });
+
+    // Start each width from a clean, empty medication list rather than
+    // compounding onto whatever the previous width left behind — reload()
+    // alone wouldn't do this, since localStorage survives a reload.
+    await page.evaluate(() => window.localStorage.clear());
+    await page.reload();
+
+    // Enough medications that the page is taller than the viewport at
+    // every one of these widths, so scrolling to the bottom is actually
+    // exercised.
+    for (let i = 0; i < 6; i++) {
+      await addMedicationViaUi(page, {
+        name: `Regression Med ${i}`,
+        dose: "100mg",
+        interval: "8",
+      });
+    }
+
+    await page.mouse.wheel(0, 20_000);
+    await expect(async () => {
+      const scrollY = await page.evaluate(() => window.scrollY);
+      expect(scrollY).toBeGreaterThan(0);
+    }).toPass();
+
+    const fabBox = await page.locator("#add-medication-fab").boundingBox();
+    const footerBox = await page.locator("footer").boundingBox();
+    const overlaps =
+      fabBox.x < footerBox.x + footerBox.width &&
+      fabBox.x + fabBox.width > footerBox.x &&
+      fabBox.y < footerBox.y + footerBox.height &&
+      fabBox.y + fabBox.height > footerBox.y;
+    expect(overlaps).toBe(false);
+  }
+});
+
 test("the FAB keeps a fixed size and a consistent margin from the viewport's bottom-right corner across viewport widths, independent of the MED-22 grid's column count (MED-23 AC10)", async ({
   page,
 }) => {
