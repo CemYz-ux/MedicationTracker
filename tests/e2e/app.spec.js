@@ -1531,6 +1531,25 @@ test("the per-card Edit/Delete icon buttons and both dialogs' close controls mee
   await editDialog.getByRole("button", { name: "Close" }).click();
 });
 
+test("the per-card Edit/Delete icon buttons still meet the ~44px touch target baseline on a Cooldown card, not just Active (MED-19)", async ({
+  page,
+}) => {
+  // Guards against a future regression that accidentally scopes the 44px
+  // sizing rule to `.active` only — there's no per-state CSS override today,
+  // but nothing enforced that until this test existed.
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
+  await expect(page.locator(".medication-item")).toHaveClass(/cooldown/);
+
+  const editBox = await page.getByRole("button", { name: "Edit Aspirin" }).boundingBox();
+  expect(editBox.width).toBeGreaterThanOrEqual(44);
+  expect(editBox.height).toBeGreaterThanOrEqual(44);
+
+  const deleteBox = await page.getByRole("button", { name: "Delete Aspirin" }).boundingBox();
+  expect(deleteBox.width).toBeGreaterThanOrEqual(44);
+  expect(deleteBox.height).toBeGreaterThanOrEqual(44);
+});
+
 test("the FAB uses the app's --go color token as its fill (MED-23 AC11)", async ({ page }) => {
   const [fabColor, goTokenColor] = await page.evaluate(() => {
     const fab = document.getElementById("add-medication-fab");

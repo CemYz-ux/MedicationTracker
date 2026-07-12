@@ -423,7 +423,12 @@ button:hover {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 0.15rem;
+  /* MED-19: bumped from 0.15rem to 0.5rem (8px) now that Edit/Delete are
+     44px touch targets — the old fixed gap left ~2.4px of dead zone between
+     two adjacent buttons, one of which (Delete) is irreversible with no
+     confirmation step. A wider gap directly serves this ticket's own
+     mis-tap-reduction intent. */
+  gap: 0.5rem;
   flex-shrink: 0;
 }
 
