@@ -66,6 +66,28 @@ test("shows a medication as Active on load when its cooldown had already elapsed
   await expect(item.locator(".cooldown-countdown")).toBeHidden();
 });
 
+test("shows today's day and date in place of the old page title/subtitle/heading, with the old disclaimer text gone too", async ({
+  page,
+}) => {
+  // Freeze the clock before the module (re-)loads so the heading's
+  // client-side `new Date()` read is deterministic instead of depending on
+  // whatever day the suite happens to run on.
+  await page.clock.install({ time: new Date("2026-07-12T12:00:00.000Z") }); // a Sunday
+  await page.reload();
+
+  await expect(page.getByRole("heading", { name: "Sunday, July 12" })).toBeVisible();
+
+  // The old header/subtitle/heading/footer text this replaced or removed.
+  await expect(page.getByText("Medication Tracker", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText("Keep track of the medications you take")
+  ).toHaveCount(0);
+  await expect(page.getByText("Your medications", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText("Data is stored only in your browser")
+  ).toHaveCount(0);
+});
+
 test("opens the add-medication modal from the trigger", async ({ page }) => {
   const dialog = page.locator("#add-medication-dialog");
   await expect(dialog).not.toBeVisible();
@@ -1605,18 +1627,22 @@ test("the FAB stays fixed in the bottom-right corner while the list is scrolled,
   expect(overlaps).toBe(false);
 });
 
-test("the FAB never overlaps the footer at the true bottom of the page (MED-23 AC5 regression)", async ({
+test("the FAB never overlaps the true bottom of the page (MED-23 AC5 regression)", async ({
   page,
 }) => {
   // Regression test for a bug the code review caught: the AC5 clearance
-  // was originally reserved via padding-bottom on <main>, but <footer>
-  // renders after </main>, so the reserved gap sat between the card list
-  // and the footer instead of below it — the FAB still visually overlapped
-  // the footer's disclaimer text once the page was scrolled all the way
-  // down. Checking only `.medication-item.last()` (as the AC5 test above
-  // does) can't catch this, since the last card was never the problem —
-  // the footer below it was. This test scrolls to the true end of the
-  // page and checks the FAB against the footer's bounding box instead.
+  // was originally reserved via padding-bottom on <main>, but the page used
+  // to have a <footer> that rendered after </main>, so the reserved gap sat
+  // between the card list and the footer instead of below it — the FAB
+  // still visually overlapped the footer's disclaimer text once the page
+  // was scrolled all the way down. The footer chrome was later removed
+  // (chore/header-current-date-display), but the same class of bug is still
+  // possible for whatever ends up last in the page's flow, so this now
+  // checks the FAB against <main>'s bounding box (the last in-flow element
+  // in the body, now that both the header and footer are gone) instead of
+  // a specific landmark. Checking only `.medication-item.last()` (as the
+  // AC5 test above does) can't catch this, since the last *card* was never
+  // the problem — content below it was.
   for (const width of [320, 375, 480, 700]) {
     await page.setViewportSize({ width, height: 600 });
 
@@ -1644,12 +1670,12 @@ test("the FAB never overlaps the footer at the true bottom of the page (MED-23 A
     }).toPass();
 
     const fabBox = await page.locator("#add-medication-fab").boundingBox();
-    const footerBox = await page.locator("footer").boundingBox();
+    const mainBox = await page.locator("main").boundingBox();
     const overlaps =
-      fabBox.x < footerBox.x + footerBox.width &&
-      fabBox.x + fabBox.width > footerBox.x &&
-      fabBox.y < footerBox.y + footerBox.height &&
-      fabBox.y + fabBox.height > footerBox.y;
+      fabBox.x < mainBox.x + mainBox.width &&
+      fabBox.x + fabBox.width > mainBox.x &&
+      fabBox.y < mainBox.y + mainBox.height &&
+      fabBox.y + fabBox.height > mainBox.y;
     expect(overlaps).toBe(false);
   }
 });

@@ -10,6 +10,7 @@ import {
   isInCooldown,
   getCooldownProgress,
   formatCountdown,
+  formatCurrentDate,
 } from "./medications.js";
 
 // How often the periodic re-check re-evaluates every medication's cooldown
@@ -31,6 +32,7 @@ const cancelBtn = document.getElementById("cancel-add-btn");
 const list = document.getElementById("medication-list");
 const emptyState = document.getElementById("empty-state");
 const statusAnnouncer = document.getElementById("status-announcer");
+const dateHeading = document.getElementById("medication-list-heading");
 
 // MED-17: the Edit modal. One dialog/form, reused for whichever row's Edit
 // control was activated — same reuse pattern as the Add dialog above, just
@@ -601,5 +603,9 @@ editForm.addEventListener("submit", (event) => {
   render();
   closeEditDialog();
 });
+
+// Static site, no live-updating clock needed — just today's date as of when
+// the page loaded, replacing the old "Your medications" heading.
+dateHeading.textContent = formatCurrentDate();
 
 render();
