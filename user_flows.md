@@ -11,7 +11,7 @@ Living source of truth for what the site does. Update this file with every featu
 4. If Name, Dose, or Interval is empty, or Interval is non-numeric or not greater than zero, an inline error message is shown inside the modal (`role="alert"`), the modal stays open, and nothing is saved.
 5. On a valid submit, the medication is added with `lastTakenAt: null` (GO/cooldown are owned by MED-7/9 and not part of this flow), the modal closes, and the medication appears in "Your medications".
 6. The medication and its Name/Dose/Interval persist across page reloads (stored in `localStorage`).
-7. The modal can be closed at any time — via its close control, the Cancel button, pressing Escape, or clicking the backdrop — without saving. Every close path discards unsaved input, resets the form, and returns keyboard focus to the FAB.
+7. The modal can be closed at any time — via its close control, the Cancel button, pressing Escape, or clicking the backdrop — without saving. Every close path discards unsaved input, resets the form, and returns keyboard focus to the FAB. The close control's own touch target is ~44x44px (MED-19), the app's baseline that the FAB itself exceeds (see above).
 8. While the modal is open, Tab-based keyboard focus is contained inside it and cannot reach the page behind it.
 
 ## View medications
@@ -37,7 +37,7 @@ Living source of truth for what the site does. Update this file with every featu
 ## Edit a medication's Name and Dosage
 **Status:** Implemented
 **Flow:**
-1. Every medication card (Active or Cooldown) shows a small pencil-icon "Edit" control in its header, labeled for assistive tech as "Edit {medication name}" and reachable/operable via keyboard alone (Tab to focus, Enter/Space to activate) — the first per-card secondary-action icon button in the app, sitting alongside the Delete ("x") control (see "Delete a medication" below).
+1. Every medication card (Active or Cooldown) shows a small pencil-icon "Edit" control in its header, labeled for assistive tech as "Edit {medication name}" and reachable/operable via keyboard alone (Tab to focus, Enter/Space to activate) — the first per-card secondary-action icon button in the app, sitting alongside the Delete ("x") control (see "Delete a medication" below). Both controls' touch targets are ~44x44px (MED-19), the app's baseline touch-target size — the glyph itself stays visually small; only the clickable area around it is sized up.
 2. Activating a card's Edit control opens a modal dialog (native `<dialog>` + `showModal()`) containing only Name and Dose fields, pre-filled with that specific medication's current saved values — never blank, and never another medication's values. This is a separate dialog element from the Add-medication modal (mirrors its markup/CSS classes and interaction pattern, but is not a shared/mode-toggling dialog), and it deliberately has no Interval field — Interval remains editable exclusively via its own existing inline per-card control (see "Edit a medication's interval" below).
 3. User changes Name and/or Dose and submits.
 4. If Name or Dose is empty, an inline error message is shown inside the modal (`role="alert"`), the modal stays open, and nothing is saved — mirroring the Add-medication modal's own empty-field validation.
