@@ -248,11 +248,20 @@ button:hover {
 }
 
 /* "×" control styling per the design note: small circular hover target,
-   soft ink color at rest, danger color on hover. */
+   soft ink color at rest, danger color on hover.
+   MED-19: width/height (not padding) drive the ~44px tap target, mirroring
+   the FAB's own sizing approach above — an explicit box with a flex-centered
+   glyph keeps the "×" itself the same visual size while growing only the
+   clickable area around it. */
 .close-dialog-btn {
   background: transparent;
   color: var(--ink-soft);
-  padding: 0.2rem 0.5rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 1.25rem;
   line-height: 1;
   border-radius: 999px;
@@ -375,11 +384,20 @@ button:hover {
    dialog's own close control, with each action layering its own hover color
    on top of this shared base rather than each inventing a parallel
    convention (edit isn't destructive, so it hovers to `--go`; delete is, so
-   it hovers to `--danger`). */
+   it hovers to `--danger`).
+   MED-19: sized here on the shared base rather than per-modifier — both
+   `.icon-btn.edit` and `.icon-btn.delete` combine with this class in app.js
+   (never used standalone), so one 44px box covers both controls. Same
+   width/height + flex-center approach as `.close-dialog-btn` and the FAB. */
 .icon-btn {
   background: transparent;
   color: var(--ink-soft);
-  padding: 0.3rem 0.55rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 1rem;
   line-height: 1;
   border-radius: 999px;
@@ -405,7 +423,12 @@ button:hover {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 0.15rem;
+  /* MED-19: bumped from 0.15rem to 0.5rem (8px) now that Edit/Delete are
+     44px touch targets — the old fixed gap left ~2.4px of dead zone between
+     two adjacent buttons, one of which (Delete) is irreversible with no
+     confirmation step. A wider gap directly serves this ticket's own
+     mis-tap-reduction intent. */
+  gap: 0.5rem;
   flex-shrink: 0;
 }
 
