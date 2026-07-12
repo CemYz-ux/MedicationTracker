@@ -7,6 +7,9 @@ export default defineConfig({
   use: {
     baseURL: "http://localhost:5500",
     trace: "on-first-retry",
+    // Pin locale so date-formatting assertions (e.g. the "Sunday, July 12"
+    // heading test) don't implicitly depend on Chromium's default locale.
+    locale: "en-US",
   },
   webServer: {
     command: "npx serve . -l 5500",

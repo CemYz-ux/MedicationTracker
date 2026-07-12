@@ -75,7 +75,11 @@
     </dialog>
 
     <section aria-labelledby="medication-list-heading">
-      <h1 id="medication-list-heading"></h1>
+      <!-- Seeded with the section's original static heading text so the
+           heading (and the section it labels) always has an accessible
+           name — before JS runs, or if it fails/is disabled. js/app.js
+           overwrites this with today's date on load. -->
+      <h1 id="medication-list-heading">Your medications</h1>
       <p id="empty-state">No medications yet — add one to get started.</p>
       <ul id="medication-list" class="medication-list" hidden></ul>
     </section>

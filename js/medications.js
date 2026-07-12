@@ -321,14 +321,18 @@ export function formatCountdown(medication, now = Date.now()) {
 }
 
 /**
- * Formats a date as a locale-aware "Weekday, Month Day" string, e.g. "Sunday,
- * July 12" — used in place of the static "Your medications" heading so the
- * grey list card orients the user to the day it's showing. Defaults to
- * "now" but accepts an explicit `date` so it stays pure/testable rather than
- * reaching for `new Date()` itself.
+ * Formats a date as a "Weekday, Month Day" string, e.g. "Sunday, July 12" —
+ * used in place of the static "Your medications" heading so the grey list
+ * card orients the user to the day it's showing. Defaults to "now" but
+ * accepts an explicit `date` so it stays pure/testable rather than reaching
+ * for `new Date()` itself.
+ *
+ * Locale is pinned to "en-US" rather than passed as `undefined` so the
+ * output is deterministic regardless of the host OS/browser/CI runner's
+ * default locale (the rest of this app's copy is English-only anyway).
  */
 export function formatCurrentDate(date = new Date()) {
-  return date.toLocaleDateString(undefined, {
+  return date.toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
     day: "numeric",
