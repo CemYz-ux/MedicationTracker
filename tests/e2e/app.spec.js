@@ -757,8 +757,12 @@ test("a mid-cooldown reload does not carry the fake-tick cadence past a real rea
 test("editing the interval mid-cooldown does not disturb the running countdown/fill (MED-5 invariant)", async ({
   page,
 }) => {
-  await page.clock.install();
-  await page.reload();
+  // Frozen fake clock (MED-29 regression — see `installFrozenClock`/
+  // `advanceAndFreeze`, defined above near the MED-29 tests): this test's
+  // exact-string "5h of 8h remaining" assertion needs the clock pinned at a
+  // known instant, not just fast-forwarded, now that the periodic re-check
+  // runs every ~1s instead of 30s.
+  await installFrozenClock(page);
 
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
   await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
@@ -770,7 +774,7 @@ test("editing the interval mid-cooldown does not disturb the running countdown/f
 
   // 3h elapsed: past the *edited* 2h interval, but well inside the
   // *original* 8h one — the countdown/fill must still reflect the latter.
-  await page.clock.fastForward(3 * 60 * 60 * 1000);
+  await advanceAndFreeze(page, 3 * 60 * 60 * 1000);
 
   const item = page.locator(".medication-item");
   await expect(item).toHaveClass(/cooldown/);
@@ -783,10 +787,10 @@ test("editing the interval mid-cooldown does not disturb the running countdown/f
 test("mid-cooldown reload recomputes remaining time from the stored timestamp instead of resetting it (MED-10 AC1)", async ({
   page,
 }) => {
-  // Fake clock so the elapsed-then-reload sequence is deterministic instead
-  // of racing real wall-clock time.
-  await page.clock.install();
-  await page.reload();
+  // Frozen fake clock (MED-29 regression — see `installFrozenClock`/
+  // `advanceAndFreeze` above) so the elapsed-then-reload sequence is
+  // deterministic instead of racing real wall-clock time.
+  await installFrozenClock(page);
 
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
   await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
@@ -797,15 +801,19 @@ test("mid-cooldown reload recomputes remaining time from the stored timestamp in
 
   // 2 of the 8 hours elapse before the reload — a fresh reset would show
   // 8h/100%, so asserting ~6h/75% after reload proves the remaining time was
-  // recomputed from the stored `lastTakenAt`, not restarted.
-  await page.clock.fastForward(2 * 60 * 60 * 1000);
+  // recomputed from the stored `lastTakenAt`, not restarted. Pausing at an
+  // exact target instant (`advanceAndFreeze`) rather than a bare
+  // `fastForward` keeps the clock pinned there *through* the reload itself,
+  // instead of continuing to run in real time during navigation.
+  await advanceAndFreeze(page, 2 * 60 * 60 * 1000);
   await page.reload();
 
   const itemAfterReload = page.locator(".medication-item");
   await expect(itemAfterReload).toHaveClass(/cooldown/);
   // Numeric tolerance, not an exact "75%" string match: navigation across
-  // the reload can leak a few milliseconds of real time before the fake
-  // clock re-attaches to the new page, so the recomputed fraction lands
+  // the reload can still leak a little real time before the fake clock
+  // re-attaches to the new page (freezing beforehand only removes the
+  // *pre*-reload drift source), so the recomputed fraction can land
   // fractionally under 75% (e.g. 74.9999%) rather than exactly on it.
   const progressPercent = await itemAfterReload.evaluate((el) =>
     parseFloat(getComputedStyle(el).getPropertyValue("--progress"))
@@ -1261,24 +1269,26 @@ test("editing Name/Dose mid-cooldown leaves lastTakenAt, the countdown, Cooldown
   // this exact accessibility mode), making every set instant/synchronous.
   await page.emulateMedia({ reducedMotion: "reduce" });
 
-  await page.clock.install();
-  await page.reload();
+  // Frozen fake clock (MED-29 regression — see `installFrozenClock`/
+  // `advanceAndFreeze` above): this test asserts the exact-string "5h of 8h
+  // remaining" *twice* (before and after the edit), so the clock needs to
+  // stay pinned at a known instant across the whole edit-dialog interaction,
+  // not just fast-forwarded once and left running.
+  await installFrozenClock(page);
 
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
   await page.getByRole("button", { name: "GO — log Aspirin taken" }).click();
 
-  await page.clock.fastForward(3 * 60 * 60 * 1000);
+  await advanceAndFreeze(page, 3 * 60 * 60 * 1000);
 
   const item = page.locator(".medication-item");
-  // `fastForward` jumps the clock's value but doesn't synchronously fire the
-  // periodic `runCooldownTick` interval that actually recomputes
-  // `--progress` — the existing MED-8 fast-forward test only gets away with
-  // reading `--progress` right after `fastForward` because `toHaveCSS` is a
-  // polling assertion that retries until that tick catches up. A one-shot
-  // read (needed here, since we're capturing a snapshot to diff against
-  // later, not asserting a fixed value) would otherwise race ahead of the
-  // tick and capture a stale, still-~100% value. Waiting for the countdown
-  // text first forces that same settle.
+  // `advanceAndFreeze` (`pauseAt` under the hood) fires any due timers
+  // synchronously as it jumps forward — same catch-up behavior `fastForward`
+  // has — so `--progress` is already settled by the time this resolves.
+  // Still asserting the countdown text first (rather than reading
+  // `--progress` directly) before taking the one-shot snapshot below, since
+  // that's the meaningful proof the seconds-precision remaining time landed
+  // exactly on the expected boundary.
   await expect(page.getByText("5h of 8h remaining")).toBeVisible();
 
   const storedBefore = await page.evaluate(() =>
@@ -1297,11 +1307,12 @@ test("editing Name/Dose mid-cooldown leaves lastTakenAt, the countdown, Cooldown
   await expect(item).toHaveClass(/cooldown/);
   await expect(page.getByText("5h of 8h remaining")).toBeVisible();
   // Numeric comparison against the pre-edit fill, not a hardcoded "62.5%":
-  // a fake-but-ticking clock lets a few real milliseconds pass while the
-  // Edit dialog is being driven (same drift source as MED-10's reload
-  // test), which is fine — what the AC actually forbids is the *edit*
-  // disturbing the countdown/fill, which would show up as tens of
-  // percentage points of jump, not sub-1% clock drift.
+  // the frozen clock (`installFrozenClock`/`advanceAndFreeze`, MED-29) keeps
+  // real time from leaking in while the Edit dialog is being driven, so in
+  // practice this is now an exact match — but a small tolerance is kept
+  // regardless, since what the AC actually forbids is the *edit* disturbing
+  // the countdown/fill, which would show up as tens of percentage points of
+  // jump, not sub-1% noise.
   const progressAfterEdit = await item.evaluate((el) =>
     parseFloat(getComputedStyle(el).getPropertyValue("--progress"))
   );
