@@ -136,7 +136,8 @@ input {
 }
 
 input:focus-visible,
-button:focus-visible {
+button:focus-visible,
+[role="button"]:focus-visible {
   outline: 3px solid var(--go);
   outline-offset: 2px;
 }
@@ -155,20 +156,6 @@ button {
 
 button:hover {
   background: #255a43;
-}
-
-/* Stop button variant (MED-11): visually distinct from the primary GO
-   action (outline, not filled) since it's a corrective/cancel action, not
-   the primary one. Only ever shown on a row while it is in cooldown — see
-   `stopButton.hidden` in app.js. */
-.btn.stop {
-  background: #fff;
-  color: var(--wait);
-  border: 1px solid var(--wait-line);
-}
-
-.btn.stop:hover {
-  background: var(--wait-soft);
 }
 
 .form-error {
@@ -333,8 +320,15 @@ button:hover {
   /* Extra bottom padding permanently reserves room for the bottom-right
      countdown badge (see `.cooldown-countdown` below) so switching between
      Active and Cooldown never changes the card's height (MED-18) — the
-     space is reserved at all times, not just while the badge is shown. */
-  padding: 1.1rem 1.2rem 2.5rem;
+     space is reserved at all times, not just while the badge is shown.
+     MED-32: extra top padding does the same job for `.header-actions`
+     (Edit/Delete/Reset), now absolutely positioned in the card's top-right
+     corner rather than sharing a flex row with the title (see
+     `.header-actions` below for why) — reserved so the tap-target's title
+     text, which now starts in normal flow below this padding, never renders
+     underneath the icon row regardless of card state. This is a minimal,
+     functional-only layout fix, not MED-33's full visual redesign. */
+  padding: 3.75rem 1.2rem 2.5rem;
   border: 1px solid var(--rule);
   border-radius: 10px;
   background: #fff;
@@ -363,10 +357,29 @@ button:hover {
   );
 }
 
+/* MED-32: a paused cooldown keeps the same amber cooldown treatment above
+   (still frozen mid-fill) plus a dashed border, so a Paused card reads as
+   visually distinct from a running Cooldown one at a glance without a full
+   second color — full visual polish is MED-33's job. */
+.medication-item.paused {
+  border-style: dashed;
+}
+
+/* MED-32: the whole-card tap-to-toggle region (log / pause / resume). A
+   pointer cursor signals it's clickable even though it isn't a native
+   <button>; its own `:focus-visible` ring comes from the shared
+   `[role="button"]:focus-visible` rule above. */
+.card-tap-target {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
 .medication-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.5rem;
   font-size: 1.05rem;
 }
@@ -408,11 +421,27 @@ button:hover {
   color: var(--danger);
 }
 
-/* Groups the per-card Edit and Delete icon-buttons so `.medication-header`
-   still has exactly two flex children (this group and `.medication-title`)
-   — `justify-content: space-between` on the header pushes just those two
-   apart, rather than spreading three+ items independently. */
+/* MED-32: Reset hovers to the same amber used for the Cooldown/Paused pill
+   and countdown text (`--wait`) — it's the control that starts a fresh
+   cooldown, so it shares that state's color rather than Edit's neutral-to-
+   go or Delete's neutral-to-danger treatment. */
+.icon-btn.reset:hover {
+  color: var(--wait);
+}
+
+/* Groups the per-card Edit/Delete/Reset icon-buttons. MED-32: absolutely
+   positioned in the card's top-right corner (mirroring `.cooldown-countdown`
+   below, the card's other absolutely-positioned corner element) rather than
+   sharing a flex row with the title inside `.medication-header` — these are
+   now DOM siblings of `.card-tap-target`, not its descendants (see that
+   tap-target's own comment in app.js for why), so they can no longer share
+   a flex parent with the title group at all. `.medication-item`'s
+   `padding-top` above reserves the room this occupies so the title, which
+   flows normally below it, never renders underneath. */
 .header-actions {
+  position: absolute;
+  top: 0.9rem;
+  right: 1.2rem;
   display: flex;
   align-items: center;
   /* MED-19: bumped from 0.15rem to 0.5rem (8px) now that Edit/Delete are
@@ -485,52 +514,36 @@ button:hover {
   text-align: right;
 }
 
-.interval-field {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.interval-field label {
-  font-weight: 400;
-  font-family: var(--font-sans);
-  font-size: 0.8rem;
-  color: var(--ink-soft);
-  white-space: nowrap;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.interval-field input {
-  width: 5.5rem;
-}
-
 .row-error {
   margin: 0;
 }
 
-/* Matches `.btn.stop`'s 1px border with a transparent one of the same
-   width, so GO and Stop are the same box height. Without this, `.actions`
-   (and therefore the whole card) grew by the border's 2px whenever Stop
-   appeared alongside GO on cooldown entry — a second, more subtle source of
-   the same GO-press reflow MED-18 exists to eliminate. */
-.go-btn {
-  border: 1px solid transparent;
+/* MED-32: the "Revert to Active" control inside the Edit dialog — visually
+   a secondary/outline action (like the removed Stop button it replaces),
+   distinct from the primary "Save changes" submit. Shown only while the
+   medication being edited is in Cooldown or Paused (`revertToActiveBtn.hidden`
+   in app.js); sits above the Cancel/Save row since it's an independent
+   action, not part of the Name/Dose/Interval save flow. */
+.revert-to-active-btn {
+  display: block;
+  width: 100%;
+  margin-block-end: 0.75rem;
+  background: #fff;
+  color: var(--wait);
+  border: 1px solid var(--wait-line);
 }
 
-/* Houses the GO and Stop buttons side by side (MED-11 adds Stop); Stop is
-   hidden outside of cooldown, so this collapses back to just GO otherwise. */
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+/* Without this, the `display: block` above (equal specificity to the
+   browser's default `[hidden] { display: none }` UA rule) would win purely
+   because author stylesheets take precedence over UA ones — silently
+   defeating `revertToActiveBtn.hidden` in app.js and showing the button on
+   an Active medication, where there's nothing to revert. */
+.revert-to-active-btn[hidden] {
+  display: none;
 }
 
-.go-btn:disabled,
-.go-btn[aria-disabled="true"] {
-  background: var(--rule);
-  color: var(--ink-soft);
-  cursor: not-allowed;
+.revert-to-active-btn:hover {
+  background: var(--wait-soft);
 }
 
 /* Visually hides content while keeping it in the accessibility tree, so
