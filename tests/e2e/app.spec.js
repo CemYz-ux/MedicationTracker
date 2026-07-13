@@ -379,6 +379,29 @@ test("an Active card's tap-target is a keyboard-reachable role=button with an ac
   await expect(tapTarget).toBeFocused();
 });
 
+test("the tap target spans the card's full width, not just its text content — a tap anywhere on the card logs a dose (MED-32 AC1/AC12 'whole-card' regression guard)", async ({
+  page,
+}) => {
+  // Regression guard for a real bug caught in review: `.medication-item`'s
+  // `align-items: flex-start` shrinks a flex child that doesn't explicitly
+  // opt out back down to the width of its content, so `.card-tap-target`
+  // (a flex child of it) rendered far narrower than the visible card unless
+  // it explicitly stretches. `cardTapTarget(...).click()` alone can't catch
+  // this — Playwright clicks the located element's own center, which is
+  // inside its content regardless of how narrow that content box is. This
+  // test instead clicks a point derived from the *card's* bounding box, well
+  // into its right-hand whitespace, to confirm the tap target's hit area
+  // genuinely covers it.
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const item = page.locator(".medication-item");
+  const box = await item.boundingBox();
+  await page.mouse.click(box.x + box.width - 30, box.y + box.height / 2);
+
+  await expect(item).toHaveClass(/cooldown/);
+  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Pause Aspirin cooldown");
+});
+
 test("tapping an Active card logs the current timestamp, persists it, and flips the card to Cooldown", async ({
   page,
 }) => {
