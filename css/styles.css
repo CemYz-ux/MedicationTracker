@@ -368,11 +368,21 @@ button:hover {
 /* MED-32: the whole-card tap-to-toggle region (log / pause / resume). A
    pointer cursor signals it's clickable even though it isn't a native
    <button>; its own `:focus-visible` ring comes from the shared
-   `[role="button"]:focus-visible` rule above. */
+   `[role="button"]:focus-visible` rule above.
+   `align-self: stretch` is load-bearing, not decorative: `.medication-item`
+   sets `align-items: flex-start` (so it can size its own flex children,
+   like the pill, to their content rather than stretching everything), which
+   without this override also shrinks `.card-tap-target` down to the width
+   of its widest line of text — leaving most of the visible card (anything
+   right of the title/pill/countdown) unresponsive to a tap despite this
+   being documented as the "whole-card" target. Confirmed via
+   `elementFromPoint` at the card's right edge before this fix: it resolved
+   to the `<li>` itself, not `.card-tap-target`. */
 .card-tap-target {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  align-self: stretch;
   gap: 0.5rem;
   cursor: pointer;
 }
