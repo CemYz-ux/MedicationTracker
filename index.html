@@ -48,8 +48,11 @@
 
     <!-- MED-17: a single, separate dialog (not a shared Add/Edit dialog)
          reused across rows -- whichever row's Edit control is activated
-         populates it with that row's current Name/Dose via app.js, mirroring
-         how the Add dialog above is one element reused for every add. -->
+         populates it with that row's current Name/Dose/Interval via app.js,
+         mirroring how the Add dialog above is one element reused for every
+         add. MED-32 moved the Interval field in here (previously a per-card
+         inline input, MED-5) and added the "Revert to Active" control, the
+         resolved replacement for the removed Stop button. -->
     <dialog id="edit-medication-dialog" class="app-dialog" aria-labelledby="edit-medication-dialog-title">
       <form id="edit-medication-form" novalidate>
         <div class="dialog-header">
@@ -66,7 +69,19 @@
           <label for="med-edit-dose">Dose</label>
           <input id="med-edit-dose" name="dose" type="text" autocomplete="off" placeholder="e.g. 500mg" required />
         </div>
+        <div class="form-row">
+          <label for="med-edit-interval">Interval (hours)</label>
+          <input id="med-edit-interval" name="intervalHours" type="number" step="any" inputmode="decimal" required />
+        </div>
         <p id="edit-form-error" class="form-error" role="alert"></p>
+        <!-- MED-32: only shown when the medication being edited is currently
+             in Cooldown or Paused (toggled in app.js) — nothing to revert
+             from Active, mirroring the removed Stop button's own
+             shown-only-while-applicable discipline. A plain type="button" so
+             it never triggers the form's Name/Dose/Interval validation. -->
+        <button type="button" id="revert-to-active-btn" class="revert-to-active-btn" hidden>
+          Revert to Active
+        </button>
         <div class="dialog-actions">
           <button type="button" id="cancel-edit-btn">Cancel</button>
           <button type="submit">Save changes</button>
