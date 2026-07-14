@@ -357,15 +357,7 @@ button:hover {
   );
 }
 
-/* MED-32: a paused cooldown keeps the same amber cooldown treatment above
-   (still frozen mid-fill) plus a dashed border, so a Paused card reads as
-   visually distinct from a running Cooldown one at a glance without a full
-   second color — full visual polish is MED-33's job. */
-.medication-item.paused {
-  border-style: dashed;
-}
-
-/* MED-32: the whole-card tap-to-toggle region (log / pause / resume). A
+/* MED-32: the whole-card tap-to-toggle region (log / cancel). A
    pointer cursor signals it's clickable even though it isn't a native
    <button>; its own `:focus-visible` ring comes from the shared
    `[role="button"]:focus-visible` rule above.
@@ -390,8 +382,24 @@ button:hover {
 .medication-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.5rem;
   font-size: 1.05rem;
+  width: 100%;
+}
+
+/* MED-34: the always-visible interval ("how often") readout, e.g. "Every
+   8h" — shown in both Active and Cooldown states, unlike the Cooldown-only
+   countdown text (`.cooldown-countdown` below). A minimal label on the
+   existing card layout; MED-33's full compact-card redesign is out of scope
+   here. */
+.medication-interval {
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* Small icon-button convention for per-card secondary actions in the header
@@ -431,10 +439,10 @@ button:hover {
   color: var(--danger);
 }
 
-/* MED-32: Reset hovers to the same amber used for the Cooldown/Paused pill
-   and countdown text (`--wait`) — it's the control that starts a fresh
-   cooldown, so it shares that state's color rather than Edit's neutral-to-
-   go or Delete's neutral-to-danger treatment. */
+/* MED-32: Reset hovers to the same amber used for the Cooldown pill and
+   countdown text (`--wait`) — it's the control that starts a fresh cooldown,
+   so it shares that state's color rather than Edit's neutral-to-go or
+   Delete's neutral-to-danger treatment. */
 .icon-btn.reset:hover {
   color: var(--wait);
 }
@@ -526,34 +534,6 @@ button:hover {
 
 .row-error {
   margin: 0;
-}
-
-/* MED-32: the "Revert to Active" control inside the Edit dialog — visually
-   a secondary/outline action (like the removed Stop button it replaces),
-   distinct from the primary "Save changes" submit. Shown only while the
-   medication being edited is in Cooldown or Paused (`revertToActiveBtn.hidden`
-   in app.js); sits above the Cancel/Save row since it's an independent
-   action, not part of the Name/Dose/Interval save flow. */
-.revert-to-active-btn {
-  display: block;
-  width: 100%;
-  margin-block-end: 0.75rem;
-  background: #fff;
-  color: var(--wait);
-  border: 1px solid var(--wait-line);
-}
-
-/* Without this, the `display: block` above (equal specificity to the
-   browser's default `[hidden] { display: none }` UA rule) would win purely
-   because author stylesheets take precedence over UA ones — silently
-   defeating `revertToActiveBtn.hidden` in app.js and showing the button on
-   an Active medication, where there's nothing to revert. */
-.revert-to-active-btn[hidden] {
-  display: none;
-}
-
-.revert-to-active-btn:hover {
-  background: var(--wait-soft);
 }
 
 /* Visually hides content while keeping it in the accessibility tree, so
