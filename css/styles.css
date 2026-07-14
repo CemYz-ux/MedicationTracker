@@ -85,8 +85,7 @@ body {
 h1,
 h2,
 label,
-button,
-.pill {
+button {
   font-family: var(--font-sans);
   font-weight: 700;
 }
@@ -317,18 +316,19 @@ button:hover {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.5rem;
-  /* Extra bottom padding permanently reserves room for the bottom-right
-     countdown badge (see `.cooldown-countdown` below) so switching between
-     Active and Cooldown never changes the card's height (MED-18) — the
-     space is reserved at all times, not just while the badge is shown.
-     MED-32: extra top padding does the same job for `.header-actions`
-     (Edit/Delete/Reset), now absolutely positioned in the card's top-right
-     corner rather than sharing a flex row with the title (see
-     `.header-actions` below for why) — reserved so the tap-target's title
-     text, which now starts in normal flow below this padding, never renders
-     underneath the icon row regardless of card state. This is a minimal,
-     functional-only layout fix, not MED-33's full visual redesign. */
-  padding: 3.75rem 1.2rem 2.5rem;
+  /* MED-33: the countdown text and the icon row now share one top strip
+     inside `.card-tap-target` (see `.cooldown-countdown` and
+     `.header-actions` below) instead of occupying two separate corners —
+     the old bottom-right countdown padding is gone entirely, and the old
+     top padding (previously sized to clear `.header-actions` above a title
+     line with nothing else up there) shrinks to just `.header-actions`' own
+     `top` offset, since the countdown row inside the flow now reserves the
+     icon row's actual height itself. Top and bottom are intentionally not
+     identical: top matches `.header-actions`' `top: 0.9rem` exactly so the
+     absolutely-positioned icon row and the in-flow countdown row underneath
+     it start at the same vertical position (see `.cooldown-countdown`'s own
+     comment for the height math that keeps them aligned). */
+  padding: 0.9rem 1.2rem 1rem;
   border: 1px solid var(--rule);
   border-radius: 10px;
   background: #fff;
@@ -362,14 +362,14 @@ button:hover {
    <button>; its own `:focus-visible` ring comes from the shared
    `[role="button"]:focus-visible` rule above.
    `align-self: stretch` is load-bearing, not decorative: `.medication-item`
-   sets `align-items: flex-start` (so it can size its own flex children,
-   like the pill, to their content rather than stretching everything), which
-   without this override also shrinks `.card-tap-target` down to the width
-   of its widest line of text — leaving most of the visible card (anything
-   right of the title/pill/countdown) unresponsive to a tap despite this
-   being documented as the "whole-card" target. Confirmed via
-   `elementFromPoint` at the card's right edge before this fix: it resolved
-   to the `<li>` itself, not `.card-tap-target`. */
+   sets `align-items: flex-start` (so it can size its own flex children to
+   their content rather than stretching everything), which without this
+   override also shrinks `.card-tap-target` down to the width of its widest
+   line of text — leaving most of the visible card (anything right of the
+   countdown/name/dose text) unresponsive to a tap despite this being
+   documented as the "whole-card" target. Confirmed via `elementFromPoint`
+   at the card's right edge before this fix: it resolved to the `<li>`
+   itself, not `.card-tap-target`. */
 .card-tap-target {
   display: flex;
   flex-direction: column;
@@ -379,27 +379,60 @@ button:hover {
   cursor: pointer;
 }
 
-.medication-header {
+/* MED-33: the name/dose + interval-stat row, below the top strip
+   (countdown text + icon row — see `.cooldown-countdown`/`.header-actions`)
+   inside `.card-tap-target`. Replaces the old `.medication-header`, which
+   held the title and MED-34's plain-text interval label side by side; the
+   interval readout is now the numeral+caption stat below, not inline text,
+   so this row's job is just the two-column split (name/dose vs. stat). */
+.medication-body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.75rem;
   font-size: 1.05rem;
   width: 100%;
 }
 
-/* MED-34: the always-visible interval ("how often") readout, e.g. "Every
-   8h" — shown in both Active and Cooldown states, unlike the Cooldown-only
-   countdown text (`.cooldown-countdown` below). A minimal label on the
-   existing card layout; MED-33's full compact-card redesign is out of scope
-   here. */
-.medication-interval {
-  font-family: var(--font-sans);
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--ink-soft);
-  white-space: nowrap;
+/* Name above dose, stacked, per the MED-33 reference screenshot — replaces
+   the old single-line "Name — Dose" text (MED-33 AC10: this story's
+   reference screenshot is the source of truth for this detail, not the
+   AC text alone). `min-width: 0` lets a long name wrap/ellipsize within its
+   own column instead of forcing the row to overflow or shrinking
+   `.medication-interval-stat` below its content width. */
+.medication-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+/* MED-33: the compact "how often" stat replacing MED-34's plain-text
+   `.medication-interval` label ("Every 8h") — a large numeral plus a small
+   uppercase caption, always visible in both Active and Cooldown (unlike the
+   Cooldown-only countdown text above), per the reference screenshot. */
+.medication-interval-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   flex-shrink: 0;
+  line-height: 1.15;
+}
+
+.medication-interval-value {
+  font-family: var(--font-sans);
+  font-size: 1.7rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.medication-interval-caption {
+  font-family: var(--font-sans);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
 }
 
 /* Small icon-button convention for per-card secondary actions in the header
@@ -439,23 +472,25 @@ button:hover {
   color: var(--danger);
 }
 
-/* MED-32: Reset hovers to the same amber used for the Cooldown pill and
-   countdown text (`--wait`) — it's the control that starts a fresh cooldown,
-   so it shares that state's color rather than Edit's neutral-to-go or
-   Delete's neutral-to-danger treatment. */
+/* MED-32: Reset hovers to the same amber used for the Cooldown state's
+   border/tint and countdown text (`--wait`) — it's the control that starts
+   a fresh cooldown, so it shares that state's color rather than Edit's
+   neutral-to-go or Delete's neutral-to-danger treatment. */
 .icon-btn.reset:hover {
   color: var(--wait);
 }
 
 /* Groups the per-card Edit/Delete/Reset icon-buttons. MED-32: absolutely
-   positioned in the card's top-right corner (mirroring `.cooldown-countdown`
-   below, the card's other absolutely-positioned corner element) rather than
-   sharing a flex row with the title inside `.medication-header` — these are
-   now DOM siblings of `.card-tap-target`, not its descendants (see that
-   tap-target's own comment in app.js for why), so they can no longer share
-   a flex parent with the title group at all. `.medication-item`'s
-   `padding-top` above reserves the room this occupies so the title, which
-   flows normally below it, never renders underneath. */
+   positioned in the card's top-right corner rather than sharing a flex row
+   with the title — these are DOM siblings of `.card-tap-target`, not its
+   descendants (see that tap-target's own comment in app.js for why), so
+   they can't share a flex parent with the title group.
+   MED-33: now overlays the top-left `.cooldown-countdown` row inside
+   `.card-tap-target` — both occupy the same visual strip, `.header-actions`
+   painting on top since it comes later in DOM order (no `z-index` needed).
+   `.cooldown-countdown`'s `min-height` (see below) matches this element's
+   44px (MED-19) button height so the two never overlap the name/dose/stat
+   row that follows. */
 .header-actions {
   position: absolute;
   top: 0.9rem;
@@ -482,54 +517,46 @@ button:hover {
   color: var(--ink-soft);
 }
 
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4em;
-  padding: 0.25em 0.75em;
-  border-radius: 999px;
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #fff;
-  width: fit-content;
-}
-
-.pill::before {
-  content: "";
-  display: inline-block;
-  width: 0.4em;
-  height: 0.4em;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.pill.go {
-  background: var(--go);
-}
-
-.pill.wait {
-  background: var(--wait);
-}
-
-/* Live countdown text on a cooldown card, e.g. "3h 12m of 5h remaining" —
+/* Live countdown text on a cooldown card, e.g. "3h 12m 45s left" —
    supplementary to the card's `--progress` fill, never a substitute for it.
-   MED-18: pinned to the card's bottom-right corner (out of normal flow) so
-   showing/hiding it on GO press never grows or shrinks the card — the
-   reserved padding-bottom on `.medication-item` above is what actually
-   guarantees the constant card height; this positioning just places the
-   text within that reserved space. */
+   MED-33: relocated from the card's bottom-right corner (MED-18's original
+   position) to the top-left of the top strip it now shares with
+   `.header-actions`, per direct user follow-up ("so the card doesn't change
+   size when clicked").
+   Unlike the old bottom-right version — out of flow via
+   `position: absolute`, with `.medication-item`'s own padding reserving its
+   space — this element is a normal in-flow child of `.card-tap-target` now,
+   so it has to reserve its own space directly. `min-height` matches
+   `.icon-btn`'s 44px touch target (MED-19) so `.header-actions`, absolutely
+   positioned on top of this same row, never overlaps the name/dose/stat row
+   that follows, regardless of whether this text is one line, wrapped, or
+   empty.
+   MED-18's "always reserve, never conditionally grow/shrink" guarantee
+   still holds, just via the `.is-hidden` modifier below (`visibility`)
+   instead of the `hidden` attribute the old absolutely-positioned version
+   used — `hidden` maps to `display: none`, which would collapse *this*
+   element's height now that it's in normal flow (irrelevant for the old
+   version, already out of flow either way). `visibility: hidden` keeps the
+   box — and its reserved height — while removing the text from view and
+   the accessibility tree.
+   `padding-right` reserves room so the text can never visually run
+   underneath `.header-actions`: three 44px icon buttons + two 0.5rem gaps
+   is 9.25rem, rounded up for a small safety margin. */
 .cooldown-countdown {
-  position: absolute;
-  right: 1.2rem;
-  bottom: 0.9rem;
+  display: flex;
+  align-items: center;
+  min-height: 2.75rem;
   margin: 0;
+  padding-right: 9.5rem;
   font-family: var(--font-sans);
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--wait);
-  text-align: right;
+  text-align: left;
+}
+
+.cooldown-countdown.is-hidden {
+  visibility: hidden;
 }
 
 .row-error {
