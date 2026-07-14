@@ -10,8 +10,7 @@ import {
   stopCooldown,
   isInCooldown,
   getCooldownProgress,
-  formatCountdown,
-  formatIntervalLabel,
+  formatRemainingLabel,
   formatCurrentDate,
 } from "./medications.js";
 
@@ -65,12 +64,12 @@ let medications = loadMedications(window.localStorage);
 let editingMedicationId = null;
 
 // Per-medication references to the DOM nodes the periodic re-check and the
-// various row-level handlers need to touch (the card, its tap-target, pill,
-// countdown text, and the icon buttons/error paragraphs in its header).
-// Populated on every full `render()` and read by `runCooldownTick()`, kept
-// separate from `medications` itself so the tick never has to rebuild the
-// list — that would blow away keyboard focus elsewhere on the page every
-// second.
+// various row-level handlers need to touch (the card, its tap-target,
+// countdown text, interval-stat numeral, and the icon buttons/error
+// paragraphs). Populated on every full `render()` and read by
+// `runCooldownTick()`, kept separate from `medications` itself so the tick
+// never has to rebuild the list — that would blow away keyboard focus
+// elsewhere on the page every second.
 const cooldownRefs = new Map();
 
 function render() {
@@ -91,14 +90,14 @@ function render() {
   }
 }
 
-// Reflects cooldown state as a status pill — green "Active" or amber
-// "Cooldown". MED-34 removed the third amber "Paused" sub-state (MED-32).
-function setCardStatus(item, pill, inCooldown) {
+// Reflects cooldown state via the card's background-tint/border-color
+// classes only — green "active" or amber "cooldown". MED-33 removed the
+// status-pill text/dot that used to accompany these classes (judged
+// sufficient to signal state on its own, per AC2); MED-34 removed the third
+// amber "Paused" sub-state (MED-32) before that.
+function setCardStatus(item, inCooldown) {
   item.classList.toggle("active", !inCooldown);
   item.classList.toggle("cooldown", inCooldown);
-  pill.classList.toggle("go", !inCooldown);
-  pill.classList.toggle("wait", inCooldown);
-  pill.textContent = inCooldown ? "Cooldown" : "Active";
 }
 
 // The card's tap-target accessible name doubles as the description of what
@@ -113,33 +112,41 @@ function tapTargetLabel(medication, inCooldown) {
 }
 
 // Re-derives and applies everything cooldown-related for one medication: the
-// tap-target's aria-label, the status pill, the countdown text, the
-// always-visible interval readout, and the card's proportional fill
-// (`--progress`). Called immediately after a tap or Reset (so the card
-// reflects the new state right away) and from the periodic tick (so it stays
-// current without a reload). Never touches any other medication's row,
-// keeping refresh cycles independent.
+// tap-target's aria-label, the card's active/cooldown tint, the top-left
+// countdown text, the always-visible interval-stat numeral, and the card's
+// proportional fill (`--progress`). Called immediately after a tap or Reset
+// (so the card reflects the new state right away) and from the periodic tick
+// (so it stays current without a reload). Never touches any other
+// medication's row, keeping refresh cycles independent.
 function updateCooldownDisplay(medication, refs, now = Date.now()) {
-  const { item, cardTapTarget, pill, countdownEl, intervalEl } = refs;
+  const { item, cardTapTarget, countdownEl, intervalValueEl } = refs;
   const inCooldown = isInCooldown(medication, now);
 
-  setCardStatus(item, pill, inCooldown);
+  setCardStatus(item, inCooldown);
   cardTapTarget.setAttribute("aria-label", tapTargetLabel(medication, inCooldown));
-  // MED-34: always-visible "how often" readout — reflects the medication's
-  // live `intervalHours`, not the cooldown-snapshotted `cooldownIntervalHours`
-  // read by `formatCountdown`'s "of Wh remaining" segment — so it stays
-  // correct in both Active and Cooldown states, including right after an
-  // Edit-dialog interval change.
-  intervalEl.textContent = formatIntervalLabel(medication.intervalHours);
+  // MED-33/MED-34: always-visible "how often" stat — reflects the
+  // medication's live `intervalHours`, not the cooldown-snapshotted
+  // `cooldownIntervalHours` the countdown text's total used to read — so it
+  // stays correct in both Active and Cooldown states, including right after
+  // an Edit-dialog interval change.
+  intervalValueEl.textContent = String(medication.intervalHours);
 
   if (inCooldown) {
-    countdownEl.textContent = formatCountdown(medication, now);
-    countdownEl.hidden = false;
+    // MED-33: the shorter "{remaining} left" wording, relocated to the top
+    // strip's left side — supersedes `formatCountdown`'s longer "of {total}
+    // remaining" phrasing at this position (see `formatRemainingLabel`).
+    countdownEl.textContent = formatRemainingLabel(medication, now);
+    countdownEl.classList.remove("is-hidden");
     const progressPercent = getCooldownProgress(medication, now) * 100;
     item.style.setProperty("--progress", `${progressPercent}%`);
   } else {
     countdownEl.textContent = "";
-    countdownEl.hidden = true;
+    // MED-33: `.is-hidden` toggles `visibility`, not `display` — this
+    // element is now in normal flow (not absolutely positioned), so hiding
+    // it via `display: none` (the old `hidden` attribute) would collapse
+    // its reserved height and change the card's total height across
+    // Active<->Cooldown, which MED-18/MED-33 both require to stay constant.
+    countdownEl.classList.add("is-hidden");
     // Active cards show no fill at all — don't leave a stray inline
     // `--progress` value sitting on the element once cooldown ends.
     item.style.removeProperty("--progress");
@@ -252,8 +259,16 @@ function renderMedicationItem(medication) {
   cardTapTarget.setAttribute("role", "button");
   cardTapTarget.tabIndex = 0;
 
-  const header = document.createElement("div");
-  header.className = "medication-header";
+  // MED-33: top-left countdown text, now a normal in-flow child of
+  // `cardTapTarget` (not absolutely positioned like the old bottom-right
+  // version) so it shares a visual top strip with `.header-actions` below.
+  // Its space is always reserved (`.cooldown-countdown`'s `min-height` in
+  // CSS) and toggled via the `is-hidden` class rather than removed/hidden
+  // outright, so appearing/disappearing across Active<->Cooldown never
+  // changes the card's height (see `updateCooldownDisplay`).
+  const countdownEl = document.createElement("p");
+  countdownEl.className = "cooldown-countdown";
+  countdownEl.classList.add("is-hidden");
 
   const nameEl = document.createElement("span");
   nameEl.className = "medication-name";
@@ -263,32 +278,33 @@ function renderMedicationItem(medication) {
   doseEl.className = "medication-dose";
   doseEl.textContent = medication.dose;
 
-  const titleGroup = document.createElement("span");
+  // MED-33: name above dose, stacked (replaces the old single-line
+  // "Name — Dose" text), per the reference screenshot.
+  const titleGroup = document.createElement("div");
   titleGroup.className = "medication-title";
-  titleGroup.append(nameEl, " — ", doseEl);
+  titleGroup.append(nameEl, doseEl);
 
-  // MED-34: always-visible "how often" readout, e.g. "Every 8h" — shown near
-  // the name/dose row in both Active and Cooldown states (unlike the
-  // Cooldown-only countdown text below), reflecting the medication's live
-  // `intervalHours`. Kept to this minimal element on the existing card
-  // layout; the full MED-33 compact-card restyle (repositioning this as a
-  // large "8 / hours" readout) is out of scope here.
-  const intervalEl = document.createElement("span");
-  intervalEl.className = "medication-interval";
+  // MED-33: the compact "how often" stat — a large numeral plus a small
+  // uppercase caption — replacing MED-34's plain-text `.medication-interval`
+  // label ("Every 8h"). Always visible in both Active and Cooldown states
+  // (unlike the Cooldown-only countdown text above), reflecting the
+  // medication's live `intervalHours` (see `updateCooldownDisplay`).
+  const intervalValueEl = document.createElement("span");
+  intervalValueEl.className = "medication-interval-value";
 
-  header.append(titleGroup, intervalEl);
+  const intervalCaptionEl = document.createElement("span");
+  intervalCaptionEl.className = "medication-interval-caption";
+  intervalCaptionEl.textContent = "hours";
 
-  const pill = document.createElement("span");
-  pill.className = "pill";
+  const intervalStat = document.createElement("div");
+  intervalStat.className = "medication-interval-stat";
+  intervalStat.append(intervalValueEl, intervalCaptionEl);
 
-  // Live countdown text, e.g. "3h 12m of 5h remaining" — supplementary to
-  // the card's fill, never a substitute for it. Hidden entirely outside of
-  // cooldown (see `updateCooldownDisplay`).
-  const countdownEl = document.createElement("p");
-  countdownEl.className = "cooldown-countdown";
-  countdownEl.hidden = true;
+  const body = document.createElement("div");
+  body.className = "medication-body";
+  body.append(titleGroup, intervalStat);
 
-  cardTapTarget.append(header, pill, countdownEl);
+  cardTapTarget.append(countdownEl, body);
 
   // MED-17: per-card Edit trigger. Accessible name identifies the medication,
   // not just "Edit" (mirrors the tap-target's own per-row aria-label
@@ -354,9 +370,8 @@ function renderMedicationItem(medication) {
   const refs = {
     item,
     cardTapTarget,
-    pill,
     countdownEl,
-    intervalEl,
+    intervalValueEl,
     editButton,
     deleteButton,
     resetButton,

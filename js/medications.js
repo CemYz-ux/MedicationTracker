@@ -401,6 +401,30 @@ export function formatCountdown(medication, now = Date.now()) {
 }
 
 /**
+ * The short "{remaining} left" countdown text shown top-left on a Cooldown
+ * card (MED-33), e.g. "2h 15m 30s left" — deliberately shorter than
+ * `formatCountdown`'s "{remaining} of {total} remaining" (MED-8/MED-29),
+ * which was written for that text's old bottom-right position (MED-18).
+ * MED-33 relocated the countdown to a top-left strip shared with the
+ * per-card icon row, where the longer "of {total} remaining" phrasing no
+ * longer fit the available width — this supersedes it for that position,
+ * reusing the exact same remaining-time math (`getCooldownRemainingMs` +
+ * `formatDuration`'s `includeSeconds: true` precision) as `formatCountdown`'s
+ * own remaining segment so the two can never drift out of sync with each
+ * other. `formatCountdown` itself is unchanged and still exported — nothing
+ * else in the app reads its output anymore, but no AC asks for its removal.
+ * Returns `null` when the medication is not currently in cooldown, mirroring
+ * `formatCountdown`'s own contract.
+ */
+export function formatRemainingLabel(medication, now = Date.now()) {
+  if (!isInCooldown(medication, now)) return null;
+  const remaining = formatDuration(getCooldownRemainingMs(medication, now), {
+    includeSeconds: true,
+  });
+  return `${remaining} left`;
+}
+
+/**
  * MED-34: the always-visible "how often" readout shown on every card
  * (Active or Cooldown alike), e.g. "Every 8h" or "Every 4h 30m" for a
  * fractional interval — reuses `formatDuration`'s existing hours/minutes
