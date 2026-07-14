@@ -8,12 +8,10 @@ import {
   removeMedication,
   logDose,
   stopCooldown,
-  pauseCooldown,
-  resumeCooldown,
   isInCooldown,
-  isPaused,
   getCooldownProgress,
   formatCountdown,
+  formatIntervalLabel,
   formatCurrentDate,
 } from "./medications.js";
 
@@ -44,9 +42,9 @@ const dateHeading = document.getElementById("medication-list-heading");
 // MED-17: the Edit modal. One dialog/form, reused for whichever row's Edit
 // control was activated — same reuse pattern as the Add dialog above, just
 // pre-filled per open() call instead of always starting blank. MED-32 added
-// the Interval field (moved out of the card's own inline input, MED-5) and
-// the Revert-to-Active control (the resolved replacement for the removed
-// Stop button).
+// the Interval field (moved out of the card's own inline input, MED-5).
+// MED-34 removed the Revert-to-Active control that briefly lived here too —
+// tapping a Cooldown card now does the same job (see `handleCardTap`).
 const editDialog = document.getElementById("edit-medication-dialog");
 const editForm = document.getElementById("edit-medication-form");
 const editNameInput = document.getElementById("med-edit-name");
@@ -55,7 +53,6 @@ const editIntervalInput = document.getElementById("med-edit-interval");
 const editErrorEl = document.getElementById("edit-form-error");
 const closeEditDialogBtn = document.getElementById("close-edit-dialog-btn");
 const cancelEditBtn = document.getElementById("cancel-edit-btn");
-const revertToActiveBtn = document.getElementById("revert-to-active-btn");
 
 let medications = loadMedications(window.localStorage);
 
@@ -94,44 +91,46 @@ function render() {
   }
 }
 
-// Reflects cooldown state as a status pill — green "Active", amber
-// "Cooldown", or (MED-32) amber "Paused" while frozen. `paused` is always
-// consulted alongside `inCooldown` (never instead of it) since a paused
-// medication is also, by definition, in cooldown (see `isInCooldown`'s own
-// doc comment in medications.js) — this just distinguishes the two amber
-// sub-states for display.
-function setCardStatus(item, pill, inCooldown, paused) {
+// Reflects cooldown state as a status pill — green "Active" or amber
+// "Cooldown". MED-34 removed the third amber "Paused" sub-state (MED-32).
+function setCardStatus(item, pill, inCooldown) {
   item.classList.toggle("active", !inCooldown);
   item.classList.toggle("cooldown", inCooldown);
-  item.classList.toggle("paused", paused);
   pill.classList.toggle("go", !inCooldown);
   pill.classList.toggle("wait", inCooldown);
-  pill.textContent = paused ? "Paused" : inCooldown ? "Cooldown" : "Active";
+  pill.textContent = inCooldown ? "Cooldown" : "Active";
 }
 
 // The card's tap-target accessible name doubles as the description of what
 // the *next* tap will do — mirrors GO/Stop's own per-row aria-label
 // discipline (a unique accessible name per row identifying the medication,
-// not just a bare action word), extended to reflect all three MED-32 states.
-function tapTargetLabel(medication, inCooldown, paused) {
-  if (paused) return `Resume ${medication.name} cooldown`;
-  if (inCooldown) return `Pause ${medication.name} cooldown`;
+// not just a bare action word). MED-34: back to the two-state model (Active
+// tap logs a dose, Cooldown tap cancels and reverts to Active) — no more
+// "Resume" wording for the removed Paused state.
+function tapTargetLabel(medication, inCooldown) {
+  if (inCooldown) return `Cancel ${medication.name} cooldown`;
   return `Log ${medication.name} dose now`;
 }
 
 // Re-derives and applies everything cooldown-related for one medication: the
-// tap-target's aria-label, the status pill, the countdown text, and the
-// card's proportional fill (`--progress`). Called immediately after a tap,
-// Reset, or Revert (so the card reflects the new state right away) and from
-// the periodic tick (so it stays current without a reload). Never touches
-// any other medication's row, keeping refresh cycles independent.
+// tap-target's aria-label, the status pill, the countdown text, the
+// always-visible interval readout, and the card's proportional fill
+// (`--progress`). Called immediately after a tap or Reset (so the card
+// reflects the new state right away) and from the periodic tick (so it stays
+// current without a reload). Never touches any other medication's row,
+// keeping refresh cycles independent.
 function updateCooldownDisplay(medication, refs, now = Date.now()) {
-  const { item, cardTapTarget, pill, countdownEl } = refs;
+  const { item, cardTapTarget, pill, countdownEl, intervalEl } = refs;
   const inCooldown = isInCooldown(medication, now);
-  const paused = isPaused(medication);
 
-  setCardStatus(item, pill, inCooldown, paused);
-  cardTapTarget.setAttribute("aria-label", tapTargetLabel(medication, inCooldown, paused));
+  setCardStatus(item, pill, inCooldown);
+  cardTapTarget.setAttribute("aria-label", tapTargetLabel(medication, inCooldown));
+  // MED-34: always-visible "how often" readout — reflects the medication's
+  // live `intervalHours`, not the cooldown-snapshotted `cooldownIntervalHours`
+  // read by `formatCountdown`'s "of Wh remaining" segment — so it stays
+  // correct in both Active and Cooldown states, including right after an
+  // Edit-dialog interval change.
+  intervalEl.textContent = formatIntervalLabel(medication.intervalHours);
 
   if (inCooldown) {
     countdownEl.textContent = formatCountdown(medication, now);
@@ -149,11 +148,8 @@ function updateCooldownDisplay(medication, refs, now = Date.now()) {
 
 // Periodic re-check: re-evaluates every medication's cooldown status so the
 // countdown/fill stay live and a medication automatically flips back to
-// Active once its interval elapses, with no reload or user action. A paused
-// medication is exempt from this by construction — `isInCooldown` reads
-// `true` unconditionally while paused (see its own doc comment), so this
-// loop never mistakes elapsed wall-clock time for a paused medication's cue
-// to reactivate (MED-9/MED-10's guarantee, preserved through MED-32).
+// Active once its interval elapses, with no reload or user action
+// (MED-9/MED-10's guarantee).
 function runCooldownTick() {
   const now = Date.now();
   for (const medication of medications) {
@@ -166,8 +162,12 @@ function runCooldownTick() {
 
 setInterval(runCooldownTick, COOLDOWN_TICK_MS);
 
-// MED-32: tapping/activating a medication's card logs a dose (Active),
-// pauses a running cooldown, or resumes a paused one — decided fresh from
+// MED-32 introduced tap-to-toggle; MED-34 reverted its three-state (Active/
+// Cooldown/Paused) behavior back to two states: tapping an Active card logs
+// a dose and starts Cooldown, tapping a Cooldown card immediately cancels it
+// and reverts to Active (the same outcome the old pre-MED-32 Stop button, and
+// then MED-32's "Revert to Active" dialog control, produced — reusing
+// `stopCooldown` unchanged rather than reimplementing it). Decided fresh from
 // `medications` (not the DOM) every time, mirroring GO/Stop's own
 // re-derive-before-acting discipline against a forced/stale invocation.
 // Same storage-failure discipline as every other mutating action in this
@@ -180,12 +180,9 @@ function handleCardTap(id, refs) {
   const now = Date.now();
   let updated;
   let announcement;
-  if (isPaused(current)) {
-    updated = resumeCooldown(medications, id, now);
-    announcement = `${current.name} cooldown resumed.`;
-  } else if (isInCooldown(current, now)) {
-    updated = pauseCooldown(medications, id, now);
-    announcement = `${current.name} cooldown paused.`;
+  if (isInCooldown(current, now)) {
+    updated = stopCooldown(medications, id, now);
+    announcement = `${current.name} reverted to Active.`;
   } else {
     updated = logDose(medications, id, now);
     announcement = `${current.name} logged.`;
@@ -213,11 +210,10 @@ function handleCardTap(id, refs) {
 }
 
 // MED-32: Reset always starts a brand-new full-length cooldown right now,
-// from ANY state (Active, running Cooldown, or Paused) — the same overwrite
-// a fresh tap-on-Active performs, via the same `logDose` (which also clears
-// any paused residue, see its own doc comment). Unlike `handleCardTap`,
-// there is deliberately no `isInCooldown`/`isPaused` guard here at all:
-// Reset is unconditional by design (AC4).
+// from either state (Active or Cooldown) — the same overwrite a fresh
+// tap-on-Active performs, via the same `logDose`. Unlike `handleCardTap`,
+// there is deliberately no `isInCooldown` guard here at all: Reset is
+// unconditional by design (AC4).
 function handleReset(medication, refs) {
   const updated = logDose(medications, medication.id, Date.now());
 
@@ -271,7 +267,16 @@ function renderMedicationItem(medication) {
   titleGroup.className = "medication-title";
   titleGroup.append(nameEl, " — ", doseEl);
 
-  header.append(titleGroup);
+  // MED-34: always-visible "how often" readout, e.g. "Every 8h" — shown near
+  // the name/dose row in both Active and Cooldown states (unlike the
+  // Cooldown-only countdown text below), reflecting the medication's live
+  // `intervalHours`. Kept to this minimal element on the existing card
+  // layout; the full MED-33 compact-card restyle (repositioning this as a
+  // large "8 / hours" readout) is out of scope here.
+  const intervalEl = document.createElement("span");
+  intervalEl.className = "medication-interval";
+
+  header.append(titleGroup, intervalEl);
 
   const pill = document.createElement("span");
   pill.className = "pill";
@@ -297,13 +302,12 @@ function renderMedicationItem(medication) {
   // Looks up the *current* medication by id rather than closing over the
   // `medication` parameter this row was rendered with: `render()` isn't the
   // only thing that changes a medication's state now (MED-32) — tapping the
-  // card to log/pause/resume, or Reset, mutate `medications` in place
-  // without a full re-render, which would otherwise leave this closure
-  // pointing at a stale snapshot. That staleness didn't matter for MED-17
-  // (Name/Dose don't change outside of `render()`), but does now: Interval's
-  // prefill and the Revert-to-Active button's visibility both depend on the
-  // medication's *current* intervalHours/cooldown state, not its state at
-  // the moment this card was last rendered.
+  // card to log/cancel, or Reset, mutate `medications` in place without a
+  // full re-render, which would otherwise leave this closure pointing at a
+  // stale snapshot. That staleness didn't matter for MED-17 (Name/Dose don't
+  // change outside of `render()`), but does now: Interval's prefill depends
+  // on the medication's *current* intervalHours, not its state at the moment
+  // this card was last rendered.
   editButton.addEventListener("click", () => {
     const current = medications.find((entry) => entry.id === medication.id) ?? medication;
     openEditDialog(current);
@@ -320,9 +324,9 @@ function renderMedicationItem(medication) {
   deleteButton.addEventListener("click", () => handleDelete(medication));
 
   // MED-32: per-card Reset trigger — starts a brand-new full-length cooldown
-  // right now from any state, and fully clears any paused residue. Always
-  // visible/enabled (unlike the old Stop button, which only showed up during
-  // cooldown): Reset is meaningful from Active too, per AC4.
+  // right now from either state. Always visible/enabled (unlike the old Stop
+  // button, which only showed up during cooldown): Reset is meaningful from
+  // Active too, per AC4.
   const resetButton = document.createElement("button");
   resetButton.type = "button";
   resetButton.className = "icon-btn reset";
@@ -352,6 +356,7 @@ function renderMedicationItem(medication) {
     cardTapTarget,
     pill,
     countdownEl,
+    intervalEl,
     editButton,
     deleteButton,
     resetButton,
@@ -513,12 +518,6 @@ function openEditDialog(medication) {
   editNameInput.value = medication.name;
   editDoseInput.value = medication.dose;
   editIntervalInput.value = medication.intervalHours;
-  // MED-32: Revert to Active only makes sense if there's an actual cooldown
-  // to cancel — hidden entirely otherwise, mirroring the removed Stop
-  // button's own shown-only-while-applicable discipline (MED-11 AC1).
-  // `isInCooldown` covers both a running cooldown and a Paused one (see its
-  // own doc comment), so Revert is available from either.
-  revertToActiveBtn.hidden = !isInCooldown(medication);
   editDialog.showModal();
 }
 
@@ -529,8 +528,8 @@ function closeEditDialog() {
 }
 
 // Same single-close-handler discipline as the Add dialog: every close path
-// (close button, Cancel, Escape, backdrop click, or a successful save/
-// revert) ends up here. Focus returns to the *specific* row's Edit button,
+// (close button, Cancel, Escape, backdrop click, or a successful save) ends
+// up here. Focus returns to the *specific* row's Edit button,
 // not a generic default — looked up fresh via `cooldownRefs` rather than a
 // cached element reference, since a successful save's `render()` (below)
 // replaces every row's DOM nodes before this handler runs (the native
@@ -611,37 +610,6 @@ editForm.addEventListener("submit", (event) => {
   medications = updated;
   render();
   closeEditDialog();
-});
-
-// MED-32: "Revert to Active" — the resolved replacement for the removed
-// Stop button (solution-architect + stakeholder sign-off, Jira comments
-// 10250/10251 on MED-32), relocated into the Edit dialog. Reuses
-// `stopCooldown` unchanged; a plain type="button" so it never triggers the
-// form's own Name/Dose/Interval validation/submit.
-revertToActiveBtn.addEventListener("click", () => {
-  const current = medications.find((medication) => medication.id === editingMedicationId);
-  if (!current || !isInCooldown(current)) {
-    return;
-  }
-
-  let updated;
-  try {
-    updated = stopCooldown(medications, editingMedicationId);
-    saveMedications(updated, window.localStorage);
-  } catch {
-    editErrorEl.textContent = "Could not revert to Active — please try again.";
-    return;
-  }
-
-  const revertedName = current.name;
-  medications = updated;
-  // Same ordering as a successful Edit save above: update the in-memory
-  // list and re-render (repopulating `cooldownRefs` with fresh nodes) before
-  // closing the dialog, so the `close` handler's focus-return lookup finds
-  // the right (post-render) Edit button rather than a stale one.
-  render();
-  closeEditDialog();
-  statusAnnouncer.textContent = `${revertedName} reverted to Active.`;
 });
 
 // Static site, no live-updating clock needed — just today's date as of when

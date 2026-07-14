@@ -84,27 +84,16 @@ export function addMedication(medications, medication) {
     dose: medication.dose.trim(),
     intervalHours: Number(medication.intervalHours),
     lastTakenAt: null,
-    // MED-32: `null` means "not paused". A non-null number means "paused,
-    // holding the exact remaining cooldown milliseconds at the pause
-    // instant". This is the app's first-ever persisted status flag — a
-    // deliberate, signed-off exception (solution-architect + stakeholder,
-    // Jira comments 10250/10251 on MED-32) to the rest of this app's
-    // "derive status fresh from stored data every time" convention (see
-    // `stopCooldown`'s own doc comment below). There is deliberately no
-    // separate `paused` boolean alongside it — presence/absence of a value
-    // here is the *sole* discriminator, so the two can never disagree.
-    pausedRemainingMs: null,
   };
   return [...medications, newMedication];
 }
 
 /**
  * Returns a new list where the medication matching `id` has its
- * intervalHours replaced. Every other field — including lastTakenAt,
- * cooldownIntervalHours, and (MED-32) pausedRemainingMs — is preserved
- * untouched, so editing the interval never disturbs a running *or paused*
- * cooldown (that recomputation only ever happens via `logDose`/GO or
- * `resumeCooldown`, never here). Throws a human-readable error on invalid
+ * intervalHours replaced. Every other field — including lastTakenAt and
+ * cooldownIntervalHours — is preserved untouched, so editing the interval
+ * never disturbs a running cooldown (that recomputation only ever happens
+ * via `logDose`/GO, never here). Throws a human-readable error on invalid
  * input; the caller should retain the previously saved value in that case.
  *
  * MED-32 relocated this function's *control* from the card's own inline
@@ -131,11 +120,11 @@ export function removeMedication(medications, id) {
 /**
  * Returns a new list where the medication matching `id` has its `name` and
  * `dose` replaced (trimmed, like `addMedication`). Every other field —
- * `intervalHours`, `lastTakenAt`, `cooldownIntervalHours`, and (MED-32)
- * `pausedRemainingMs` — is preserved untouched, so editing Name/Dose never
- * disturbs a running (or paused) cooldown or its countdown/fill (MED-17's
- * central invariant, the same discipline `updateMedicationInterval` already
- * applies to the Interval field). This function deliberately has no
+ * `intervalHours`, `lastTakenAt`, `cooldownIntervalHours` — is preserved
+ * untouched, so editing Name/Dose never disturbs a running cooldown or its
+ * countdown/fill (MED-17's central invariant, the same discipline
+ * `updateMedicationInterval` already applies to the Interval field). This
+ * function deliberately has no
  * `intervalHours` parameter at all: even though MED-32 moved Interval's
  * *control* into the same Edit dialog this function backs, Interval's
  * validation and storage write is still a separate, unchanged call to
@@ -190,15 +179,6 @@ export function logDose(medications, id, now = Date.now()) {
           ...medication,
           lastTakenAt: takenAt,
           cooldownIntervalHours: medication.intervalHours,
-          // MED-32 AC4: Reset (from Active, running Cooldown, *or* Paused)
-          // is this same function, reused unchanged/untouched by app.js —
-          // so any stale paused snapshot left over from before a Reset must
-          // be explicitly cleared here too. Without this, a Reset fired
-          // while Paused would silently leave `pausedRemainingMs` set,
-          // which `isInCooldown`'s paused short-circuit (below) would then
-          // treat as "still paused" forever, even though a brand-new
-          // cooldown had just started.
-          pausedRemainingMs: null,
         }
       : medication
   );
@@ -236,17 +216,13 @@ function cooldownReadyAt(medication) {
  * via an explicit guard rather than relying on `now < NaN` evaluating to
  * `false` (MED-10 AC4) — the outcome is unchanged, but it's now deliberate.
  *
- * MED-32: a *paused* medication is unconditionally treated as in cooldown,
- * regardless of how much real time passes — checked first, before the
- * ordinary `lastTakenAt`/`cooldownReadyAt` wall-clock comparison below even
- * runs. This is what makes the MED-9/MED-10 auto-reactivation guarantee hold
- * through a pause: without this short-circuit, `lastTakenAt` keeps sitting
- * at whatever it was when GO was pressed, so enough elapsed real time would
- * otherwise make the ordinary comparison reactivate a paused medication on
- * its own, exactly the bug this guards against.
+ * MED-34: a leftover `pausedRemainingMs` field on a medication record saved
+ * before this story shipped (MED-32's now-removed Paused state) is never
+ * read here — this function only ever looks at `lastTakenAt`/
+ * `cooldownIntervalHours`, so a stale `pausedRemainingMs` value is simply
+ * inert and can never resurrect paused-looking behavior.
  */
 export function isInCooldown(medication, now = Date.now()) {
-  if (medication.pausedRemainingMs != null) return true;
   if (!medication.lastTakenAt) return false;
   const readyAt = cooldownReadyAt(medication);
   if (Number.isNaN(readyAt)) return false;
@@ -283,20 +259,13 @@ export function isInCooldown(medication, now = Date.now()) {
  * momentarily stale (e.g. the medication reactivated on its own an instant
  * before the click was processed).
  *
- * MED-32: this function is reused, not reimplemented, as the "Revert to
- * Active" control's handler inside the Edit dialog (the resolved
- * replacement for the removed Stop button — solution-architect + stakeholder
- * sign-off, Jira comments 10250/10251). Its guard is `isInCooldown`, which
- * (see that function's own doc comment) now also returns `true` for a
- * *paused* medication — so reverting from Paused is in scope here too, not
- * just from a running cooldown. Clearing `pausedRemainingMs` back to `null`
- * alongside `lastTakenAt`/`cooldownIntervalHours` is required for that case
- * to behave correctly, not just for symmetry: without it, a reverted
- * medication would still read as paused forever afterward (`isInCooldown`'s
- * paused short-circuit doesn't look at `lastTakenAt` at all), even though
- * every other field says Active. A medication that was never paused already
- * has `pausedRemainingMs: null`, so clearing it unconditionally here is
- * inert for that (still the overwhelmingly common) case.
+ * MED-32 reused this function, unreimplemented, as the "Revert to Active"
+ * control's handler inside the Edit dialog. MED-34 removed that dedicated
+ * control (and the Paused state it existed to revert *from*) and reuses this
+ * same function again instead, still unreimplemented: tapping a Cooldown
+ * card now calls this directly (`js/app.js`'s `handleCardTap`), producing the
+ * exact same immediate cancel-and-revert-to-Active outcome the button used
+ * to.
  *
  * `now` (epoch millis) is injectable for deterministic tests; it defaults
  * to `Date.now()`.
@@ -308,106 +277,21 @@ export function stopCooldown(medications, id, now = Date.now()) {
           ...medication,
           lastTakenAt: null,
           cooldownIntervalHours: null,
-          pausedRemainingMs: null,
         }
       : medication
   );
 }
 
 /**
- * MED-32: freezes a running (unpaused) cooldown in place — captures
- * `getCooldownRemainingMs` at this exact instant into `pausedRemainingMs`
- * and otherwise leaves the medication untouched. Deliberately does *not*
- * touch `lastTakenAt` or `cooldownIntervalHours`: those keep describing when
- * the cooldown *would* have ended had it kept running, which is exactly
- * what `resumeCooldown` needs later to reconstruct a `lastTakenAt` that
- * reproduces the frozen remaining time.
- *
- * Every cooldown-derived read (`isInCooldown`, `getCooldownRemainingMs`, and
- * — by composition, since both read those two — `getCooldownProgress` and
- * `formatCountdown`) short-circuits on `pausedRemainingMs` once it's set, so
- * nothing else needs its own "is this paused" branch.
- *
- * A no-op (returns an equivalent list) if `id` doesn't match any
- * medication, the medication is not currently in cooldown, or it is already
- * paused — the last guard specifically prevents a stale/repeated pause tap
- * from re-capturing a smaller "remaining" value on top of an
- * already-frozen one. `now` (epoch millis) is injectable for deterministic
- * tests; defaults to `Date.now()`.
- */
-export function pauseCooldown(medications, id, now = Date.now()) {
-  return medications.map((medication) =>
-    medication.id === id &&
-    medication.pausedRemainingMs == null &&
-    isInCooldown(medication, now)
-      ? { ...medication, pausedRemainingMs: getCooldownRemainingMs(medication, now) }
-      : medication
-  );
-}
-
-/**
- * MED-32: resumes a paused cooldown so it counts down from exactly the
- * frozen `pausedRemainingMs` value, rather than restarting or recomputing
- * against however much wall-clock time actually passed while paused.
- * Backdates `lastTakenAt` so the ordinary `cooldownReadyAt` math
- * (`lastTakenAt + cooldownIntervalHours`) reproduces that frozen remaining
- * time as of `now`:
- *
- *     lastTakenAt = now - (totalMs - pausedRemainingMs)
- *
- * `totalMs` comes from `getCooldownTotalMs`, i.e. the medication's own
- * *snapshotted* `cooldownIntervalHours` — not the live, editable
- * `intervalHours` — so an interval edit made while paused can never
- * retroactively change what a resume produces (MED-8's snapshot invariant,
- * carried through pausing the same way it already holds across an ordinary
- * running cooldown). From the moment this returns, the medication is an
- * ordinary running cooldown, indistinguishable in storage shape from one
- * that ticked uninterrupted the whole time — no other function needs a
- * "was this ever paused" branch after this point.
- *
- * A no-op (returns an equivalent list) if `id` doesn't match any
- * medication, or if it isn't currently paused (`pausedRemainingMs` is
- * `null`) — mirrors `pauseCooldown`'s/`stopCooldown`'s own not-applicable
- * guards. `now` (epoch millis) is injectable for deterministic tests;
- * defaults to `Date.now()`.
- */
-export function resumeCooldown(medications, id, now = Date.now()) {
-  return medications.map((medication) => {
-    if (medication.id !== id || medication.pausedRemainingMs == null) {
-      return medication;
-    }
-    const totalMs = getCooldownTotalMs(medication);
-    const elapsedMs = totalMs - medication.pausedRemainingMs;
-    return {
-      ...medication,
-      lastTakenAt: new Date(now - elapsedMs).toISOString(),
-      pausedRemainingMs: null,
-    };
-  });
-}
-
-/**
- * True when `medication` is currently paused (MED-32). `pausedRemainingMs`
- * being non-null is the *sole* discriminator — there is deliberately no
- * separate `paused` boolean (see `addMedication`'s doc comment) — so this is
- * a thin, purely-for-readability wrapper around that one check, used by the
- * DOM layer to decide whether a card tap should pause or resume.
- */
-export function isPaused(medication) {
-  return medication.pausedRemainingMs != null;
-}
-
-/**
  * Milliseconds remaining until `medication`'s cooldown ends, clamped to 0
  * once it has elapsed (or if it was never logged).
  *
- * MED-32: while paused, the frozen `pausedRemainingMs` snapshot *is* the
- * remaining time — returned directly, never recomputed from `lastTakenAt`
- * (see `isInCooldown`'s matching short-circuit and doc comment for why: the
- * wall clock keeps moving while paused, but the remaining time must not).
+ * MED-34: no longer reads a leftover `pausedRemainingMs` field (MED-32's
+ * now-removed Paused state) — remaining time is always derived fresh from
+ * `lastTakenAt`/`cooldownIntervalHours`, so a stale value left over in
+ * localStorage from before this story shipped is simply inert.
  */
 export function getCooldownRemainingMs(medication, now = Date.now()) {
-  if (medication.pausedRemainingMs != null) return medication.pausedRemainingMs;
   if (!medication.lastTakenAt) return 0;
   return Math.max(0, cooldownReadyAt(medication) - now);
 }
@@ -427,11 +311,6 @@ export function getCooldownTotalMs(medication) {
  * card's fill: 1 the instant GO is pressed, receding toward 0 as time
  * passes, and exactly 0 once cooldown has ended. Always 0 when not
  * currently in cooldown, per the "Active cards show no fill" AC.
- *
- * MED-32: needs no paused-specific branch of its own — it composes cleanly
- * out of `isInCooldown` and `getCooldownRemainingMs`, both of which already
- * short-circuit on `pausedRemainingMs` when set, so a paused medication's
- * fill is automatically held at its frozen fraction too.
  */
 export function getCooldownProgress(medication, now = Date.now()) {
   if (!isInCooldown(medication, now)) return 0;
@@ -511,11 +390,6 @@ export function formatDuration(ms, { includeSeconds = false } = {}) {
  * `COOLDOWN_TICK_MS` (`js/app.js`) from 30s to ~1s so this text — and the
  * card's `--progress` fill — genuinely tick live rather than sitting frozen
  * for up to 29s between refreshes.
- *
- * MED-32: also needs no paused-specific branch — `isInCooldown` reads `true`
- * and `getCooldownRemainingMs` returns the frozen snapshot for a paused
- * medication (see both functions' own doc comments), so this composes to the
- * correct frozen countdown text automatically.
  */
 export function formatCountdown(medication, now = Date.now()) {
   if (!isInCooldown(medication, now)) return null;
@@ -524,6 +398,24 @@ export function formatCountdown(medication, now = Date.now()) {
   });
   const total = formatDuration(getCooldownTotalMs(medication));
   return `${remaining} of ${total} remaining`;
+}
+
+/**
+ * MED-34: the always-visible "how often" readout shown on every card
+ * (Active or Cooldown alike), e.g. "Every 8h" or "Every 4h 30m" for a
+ * fractional interval — reuses `formatDuration`'s existing hours/minutes
+ * formatting for consistency with the rest of the card's duration text,
+ * rather than a second bespoke formatter.
+ *
+ * Deliberately takes the raw `intervalHours` number, not a medication
+ * object: this is a general "how often is this medication taken" label,
+ * distinct from the Cooldown countdown's `cooldownIntervalHours` snapshot
+ * (`formatCountdown`'s "of Wh remaining" segment) — it reflects the live,
+ * currently-set interval and updates immediately after an Edit-dialog
+ * interval change, even mid-cooldown.
+ */
+export function formatIntervalLabel(intervalHours) {
+  return `Every ${formatDuration(intervalHours * 60 * 60 * 1000)}`;
 }
 
 /**
