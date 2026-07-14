@@ -399,7 +399,7 @@ test("the tap target spans the card's full width, not just its text content — 
   await page.mouse.click(box.x + box.width - 30, box.y + box.height / 2);
 
   await expect(item).toHaveClass(/cooldown/);
-  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Pause Aspirin cooldown");
+  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Cancel Aspirin cooldown");
 });
 
 test("tapping an Active card logs the current timestamp, persists it, and flips the card to Cooldown", async ({
@@ -416,7 +416,7 @@ test("tapping an Active card logs the current timestamp, persists it, and flips 
   const after = await page.evaluate(() => Date.now());
 
   await expect(item).toHaveClass(/cooldown/);
-  await expect(tapTarget).toHaveAccessibleName("Pause Aspirin cooldown");
+  await expect(tapTarget).toHaveAccessibleName("Cancel Aspirin cooldown");
 
   const stored = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("medications"))
@@ -425,7 +425,7 @@ test("tapping an Active card logs the current timestamp, persists it, and flips 
   const loggedTime = new Date(stored[0].lastTakenAt).getTime();
   expect(loggedTime).toBeGreaterThanOrEqual(before);
   expect(loggedTime).toBeLessThanOrEqual(after);
-  expect(stored[0].pausedRemainingMs).toBeNull();
+  expect(stored[0]).not.toHaveProperty("pausedRemainingMs");
 
   // Persists across a reload, since it's derived from the persisted
   // lastTakenAt, not just in-memory UI state.
@@ -441,7 +441,7 @@ test("tapping one medication's card does not affect another medication's state",
 
   await cardTapTarget(page, "Aspirin").click();
 
-  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Pause Aspirin cooldown");
+  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Cancel Aspirin cooldown");
   await expect(cardTapTarget(page, "Ibuprofen")).toHaveAccessibleName("Log Ibuprofen dose now");
 
   const stored = await page.evaluate(() =>
@@ -639,6 +639,89 @@ test("editing the interval mid-cooldown (via the Edit dialog, MED-32) does not d
   await expect(page.getByText("5h of 8h remaining")).toBeVisible();
 });
 
+// --- MED-34: always-visible interval ("how often") readout ---------------
+
+test("shows an always-visible interval readout near the name/dose row on an Active card", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/active/);
+  await expect(item.locator(".medication-interval")).toHaveText("Every 8h");
+});
+
+test("keeps showing the same interval readout once a card enters Cooldown, distinct from the countdown's own total (MED-34 AC7/AC8)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const item = page.locator(".medication-item");
+  await cardTapTarget(page, "Aspirin").click();
+
+  await expect(item).toHaveClass(/cooldown/);
+  // Both readouts are visible at once and say different things: the
+  // countdown's "of 8h remaining" total (unchanged, MED-8/MED-29) alongside
+  // this story's separate always-visible "Every 8h" readout.
+  await expect(page.getByText("8h of 8h remaining")).toBeVisible();
+  await expect(item.locator(".medication-interval")).toHaveText("Every 8h");
+});
+
+test("the interval readout reflects a fractional interval using the same hours/minutes formatting as the countdown", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "4.5" });
+
+  const item = page.locator(".medication-item");
+  await expect(item.locator(".medication-interval")).toHaveText("Every 4h 30m");
+});
+
+test("the interval readout updates immediately after an Edit-dialog interval change, in both Active and Cooldown states", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const item = page.locator(".medication-item");
+
+  // Active: edit the interval and confirm the readout updates without a
+  // reload.
+  await page.getByRole("button", { name: "Edit Aspirin" }).click();
+  let editDialog = page.getByRole("dialog", { name: "Edit medication" });
+  await editDialog.getByLabel("Interval (hours)").fill("6");
+  await clickAndAwaitEditDialogClose(page, "Save changes");
+
+  await expect(item.locator(".medication-interval")).toHaveText("Every 6h");
+
+  // Cooldown: editing the interval mid-cooldown must not disturb the
+  // running countdown/fill (MED-5 invariant, unchanged) but the always-
+  // visible readout still reflects the newly-edited live intervalHours.
+  await cardTapTarget(page, "Aspirin").click();
+  await expect(item).toHaveClass(/cooldown/);
+
+  await page.getByRole("button", { name: "Edit Aspirin" }).click();
+  editDialog = page.getByRole("dialog", { name: "Edit medication" });
+  await editDialog.getByLabel("Interval (hours)").fill("3");
+  await clickAndAwaitEditDialogClose(page, "Save changes");
+
+  await expect(item).toHaveClass(/cooldown/);
+  await expect(page.getByText("6h of 6h remaining")).toBeVisible();
+  await expect(item.locator(".medication-interval")).toHaveText("Every 3h");
+});
+
+test("each medication's interval readout is independent of every other medication's", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
+
+  await expect(
+    page.locator(".medication-item", { hasText: "Aspirin" }).locator(".medication-interval")
+  ).toHaveText("Every 8h");
+  await expect(
+    page.locator(".medication-item", { hasText: "Ibuprofen" }).locator(".medication-interval")
+  ).toHaveText("Every 6h");
+});
+
 // --- MED-10: cooldown/active state stays correct across reload/reopen -----
 
 test("mid-cooldown reload recomputes remaining time from the stored timestamp instead of resetting it (MED-10 AC1)", async ({
@@ -695,9 +778,10 @@ test("a medication whose cooldown fully elapsed while the tab was closed shows A
   await expect(item.locator(".cooldown-countdown")).toBeHidden();
 });
 
-// --- MED-32: pause a running cooldown -------------------------------------
+// --- MED-34: tapping a Cooldown card cancels immediately, reverting to
+// Active (reverts MED-32's Paused state — no more freeze-in-place) ---------
 
-test("tapping a running (unpaused) Cooldown card pauses it — freezes the remaining time, does not revert to Active, does not reset", async ({
+test("tapping a running Cooldown card cancels it immediately and reverts to Active — not frozen/paused (MED-34 AC2, the regression MED-32's Paused state would have caused)", async ({
   page,
 }) => {
   await installFrozenClock(page);
@@ -711,100 +795,37 @@ test("tapping a running (unpaused) Cooldown card pauses it — freezes the remai
   await tapTarget.click();
 
   const item = page.locator(".medication-item");
-  await expect(item).toHaveClass(/cooldown/);
-  await expect(item).toHaveClass(/paused/);
-  await expect(item).not.toHaveClass(/active/);
-  await expect(tapTarget).toHaveAccessibleName("Resume Aspirin cooldown");
-  await expect(page.getByText("6h of 8h remaining")).toBeVisible();
+  await expect(item).toHaveClass(/active/);
+  await expect(item).not.toHaveClass(/cooldown/);
+  await expect(item).not.toHaveClass(/paused/);
+  await expect(tapTarget).toHaveAccessibleName("Log Aspirin dose now");
+  await expect(item.locator(".cooldown-countdown")).toBeHidden();
 
   const stored = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("medications"))
   );
-  expect(stored[0].pausedRemainingMs).toBe(6 * 60 * 60 * 1000);
-  // lastTakenAt is untouched by pausing — only the derived display is
-  // frozen, per the pure-function invariant.
-  expect(stored[0].lastTakenAt).not.toBeNull();
+  expect(stored[0].lastTakenAt).toBeNull();
+  expect(stored[0].cooldownIntervalHours).toBeNull();
 });
 
-test("a paused medication's countdown/fill do not move even as real cooldown-tick time passes", async ({
-  page,
-}) => {
-  // Reduced motion disables `--progress`'s 0.2s CSS transition (already
-  // wired in styles.css for this exact accessibility mode), making every
-  // set instant/synchronous — otherwise a one-shot `getComputedStyle` read
-  // taken right after a JS update can catch an in-flight animation frame
-  // instead of the settled value (see the equivalent MED-17 invariant test
-  // above for the same discipline).
-  await page.emulateMedia({ reducedMotion: "reduce" });
+test("cancelling via tap persists to localStorage and survives a reload", async ({ page }) => {
   await installFrozenClock(page);
 
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
   await cardTapTarget(page, "Aspirin").click();
   await advanceAndFreeze(page, 2 * 60 * 60 * 1000);
-  await cardTapTarget(page, "Aspirin").click(); // pause
-
-  const item = page.locator(".medication-item");
-  const progressWhenPaused = await item.evaluate((el) =>
-    parseFloat(getComputedStyle(el).getPropertyValue("--progress"))
-  );
-
-  // Advance the clock well past what would have been the original 8h
-  // cooldown's natural end — the countdown/fill must stay exactly where
-  // they were frozen.
-  await advanceAndFreeze(page, 10 * 60 * 60 * 1000);
-
-  await expect(page.getByText("6h of 8h remaining")).toBeVisible();
-  const progressAfterWaiting = await item.evaluate((el) =>
-    parseFloat(getComputedStyle(el).getPropertyValue("--progress"))
-  );
-  expect(progressAfterWaiting).toBe(progressWhenPaused);
-  await expect(item).toHaveClass(/paused/);
-});
-
-test("pausing persists to localStorage and survives a reload", async ({ page }) => {
-  await installFrozenClock(page);
-
-  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
-  await cardTapTarget(page, "Aspirin").click();
-  await advanceAndFreeze(page, 2 * 60 * 60 * 1000);
-  await cardTapTarget(page, "Aspirin").click(); // pause
+  await cardTapTarget(page, "Aspirin").click(); // cancel
 
   await page.reload();
 
   const item = page.locator(".medication-item");
-  await expect(item).toHaveClass(/paused/);
-  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Resume Aspirin cooldown");
-  await expect(page.getByText("6h of 8h remaining")).toBeVisible();
-
-  const stored = await page.evaluate(() =>
-    JSON.parse(window.localStorage.getItem("medications"))
-  );
-  expect(stored[0].pausedRemainingMs).toBe(6 * 60 * 60 * 1000);
+  await expect(item).toHaveClass(/active/);
+  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Log Aspirin dose now");
 });
 
-test("a paused medication never auto-reactivates even after its original interval would have fully elapsed (MED-9/MED-10 guarantee through MED-32)", async ({
+test("cancelling one medication's cooldown via tap does not affect another medication", async ({
   page,
 }) => {
-  await installFrozenClock(page);
-
-  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "1" });
-  await cardTapTarget(page, "Aspirin").click();
-  await advanceAndFreeze(page, 30 * 60 * 1000); // 30 of 60 minutes elapsed
-  await cardTapTarget(page, "Aspirin").click(); // pause with 30m left
-
-  const item = page.locator(".medication-item");
-  await expect(item).toHaveClass(/paused/);
-
-  // Advance well past the point the original 1h cooldown would have ended.
-  await advanceAndFreeze(page, 5 * 60 * 60 * 1000);
-
-  await expect(item).toHaveClass(/paused/);
-  await expect(item).not.toHaveClass(/active/);
-  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Resume Aspirin cooldown");
-  await expect(page.getByText("30m of 1h remaining")).toBeVisible();
-});
-
-test("pausing one medication does not affect another medication's cooldown", async ({ page }) => {
   await installFrozenClock(page);
 
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
@@ -814,19 +835,19 @@ test("pausing one medication does not affect another medication's cooldown", asy
   await cardTapTarget(page, "Ibuprofen").click();
   await advanceAndFreeze(page, 1 * 60 * 60 * 1000);
 
-  await cardTapTarget(page, "Aspirin").click(); // pause Aspirin only
+  await cardTapTarget(page, "Aspirin").click(); // cancel Aspirin only
 
-  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Resume Aspirin cooldown");
-  await expect(cardTapTarget(page, "Ibuprofen")).toHaveAccessibleName("Pause Ibuprofen cooldown");
+  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Log Aspirin dose now");
+  await expect(cardTapTarget(page, "Ibuprofen")).toHaveAccessibleName("Cancel Ibuprofen cooldown");
 
   const stored = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("medications"))
   );
   const ibuprofen = stored.find((medication) => medication.name === "Ibuprofen");
-  expect(ibuprofen.pausedRemainingMs).toBeNull();
+  expect(ibuprofen.lastTakenAt).not.toBeNull();
 });
 
-test("shows an inline error and leaves the cooldown running (not paused) when the localStorage write fails on pause", async ({
+test("shows an inline error and leaves the cooldown running when the localStorage write fails on tap-to-cancel", async ({
   page,
 }) => {
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
@@ -845,84 +866,10 @@ test("shows an inline error and leaves the cooldown running (not paused) when th
   );
   const item = page.locator(".medication-item");
   await expect(item).toHaveClass(/cooldown/);
-  await expect(item).not.toHaveClass(/paused/);
-  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Pause Aspirin cooldown");
+  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Cancel Aspirin cooldown");
 });
 
-// --- MED-32: resume a paused cooldown -------------------------------------
-
-test("tapping a Paused card resumes it, counting down from exactly the frozen remaining value", async ({
-  page,
-}) => {
-  await installFrozenClock(page);
-
-  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
-  await cardTapTarget(page, "Aspirin").click();
-  await advanceAndFreeze(page, 2 * 60 * 60 * 1000); // 6h left
-  await cardTapTarget(page, "Aspirin").click(); // pause
-
-  // A lot of real/frozen time passes while paused — proves the resume
-  // doesn't care how long the pause itself lasted.
-  await advanceAndFreeze(page, 20 * 60 * 60 * 1000);
-
-  const tapTarget = cardTapTarget(page, "Aspirin");
-  await tapTarget.click(); // resume
-
-  const item = page.locator(".medication-item");
-  await expect(item).toHaveClass(/cooldown/);
-  await expect(item).not.toHaveClass(/paused/);
-  await expect(tapTarget).toHaveAccessibleName("Pause Aspirin cooldown");
-  await expect(page.getByText("6h of 8h remaining")).toBeVisible();
-
-  // Ticking forward from the resume point: ends exactly 6h later, not 8h
-  // and not immediately.
-  await advanceAndFreeze(page, 6 * 60 * 60 * 1000 - 1000);
-  await expect(page.getByText(/of 8h remaining/)).toBeVisible();
-  await advanceAndFreeze(page, 1000);
-  await expect(item).toHaveClass(/active/);
-});
-
-test("resuming clears pausedRemainingMs in storage", async ({ page }) => {
-  await installFrozenClock(page);
-
-  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
-  await cardTapTarget(page, "Aspirin").click();
-  await advanceAndFreeze(page, 2 * 60 * 60 * 1000);
-  await cardTapTarget(page, "Aspirin").click(); // pause
-  await cardTapTarget(page, "Aspirin").click(); // resume
-
-  const stored = await page.evaluate(() =>
-    JSON.parse(window.localStorage.getItem("medications"))
-  );
-  expect(stored[0].pausedRemainingMs).toBeNull();
-});
-
-test("shows an inline error and leaves the medication Paused when the localStorage write fails on resume", async ({
-  page,
-}) => {
-  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
-  await cardTapTarget(page, "Aspirin").click();
-  await cardTapTarget(page, "Aspirin").click(); // pause
-
-  await page.evaluate(() => {
-    window.localStorage.setItem = () => {
-      throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
-    };
-  });
-
-  await cardTapTarget(page, "Aspirin").click(); // attempt resume
-
-  await expect(page.getByRole("alert").last()).toHaveText(
-    "Could not update — please try again."
-  );
-  const item = page.locator(".medication-item");
-  await expect(item).toHaveClass(/paused/);
-  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Resume Aspirin cooldown");
-});
-
-// --- MED-32: interval/name/dose edits while paused must not disturb it ---
-
-test("editing the interval while paused (via the Edit dialog) does not touch pausedRemainingMs or un-pause the card", async ({
+test("editing the interval mid-cooldown (via the Edit dialog) does not un-cancel or otherwise change whether tapping the card cancels it", async ({
   page,
 }) => {
   await installFrozenClock(page);
@@ -930,7 +877,6 @@ test("editing the interval while paused (via the Edit dialog) does not touch pau
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
   await cardTapTarget(page, "Aspirin").click();
   await advanceAndFreeze(page, 2 * 60 * 60 * 1000);
-  await cardTapTarget(page, "Aspirin").click(); // pause with 6h left
 
   await page.getByRole("button", { name: "Edit Aspirin" }).click();
   const editDialog = page.getByRole("dialog", { name: "Edit medication" });
@@ -938,49 +884,36 @@ test("editing the interval while paused (via the Edit dialog) does not touch pau
   await clickAndAwaitEditDialogClose(page, "Save changes");
 
   const item = page.locator(".medication-item");
-  await expect(item).toHaveClass(/paused/);
+  await expect(item).toHaveClass(/cooldown/);
   await expect(page.getByText("6h of 8h remaining")).toBeVisible();
 
+  await cardTapTarget(page, "Aspirin").click(); // cancel
+
+  await expect(item).toHaveClass(/active/);
   const stored = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("medications"))
   );
-  expect(stored[0].pausedRemainingMs).toBe(6 * 60 * 60 * 1000);
+  expect(stored[0].lastTakenAt).toBeNull();
   expect(stored[0].intervalHours).toBe(2);
-  expect(stored[0].cooldownIntervalHours).toBe(8);
 });
 
-test("editing Name/Dose while paused does not un-pause and does not touch pausedRemainingMs", async ({
+test("tapping to cancel keeps focus on the card and announces the change to assistive tech (MED-34, mirrors the removed Revert-to-Active button's own focus/announcement)", async ({
   page,
 }) => {
-  await installFrozenClock(page);
-
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
-  await cardTapTarget(page, "Aspirin").click();
-  await advanceAndFreeze(page, 2 * 60 * 60 * 1000);
-  await cardTapTarget(page, "Aspirin").click(); // pause
 
-  await page.getByRole("button", { name: "Edit Aspirin" }).click();
-  const editDialog = page.getByRole("dialog", { name: "Edit medication" });
-  await editDialog.getByLabel("Name").fill("Buffered Aspirin");
-  await editDialog.getByLabel("Dose").fill("150mg");
-  await clickAndAwaitEditDialogClose(page, "Save changes");
+  const tapTarget = cardTapTarget(page, "Aspirin");
+  await tapTarget.click(); // log
 
-  const item = page.locator(".medication-item");
-  await expect(item).toHaveClass(/paused/);
-  await expect(page.getByText("6h of 8h remaining")).toBeVisible();
-  await expect(cardTapTarget(page, "Buffered Aspirin")).toHaveAccessibleName(
-    "Resume Buffered Aspirin cooldown"
-  );
+  await tapTarget.click(); // cancel
 
-  const stored = await page.evaluate(() =>
-    JSON.parse(window.localStorage.getItem("medications"))
-  );
-  expect(stored[0].pausedRemainingMs).toBe(6 * 60 * 60 * 1000);
+  await expect(tapTarget).toBeFocused();
+  await expect(page.getByRole("status")).toHaveText("Aspirin reverted to Active.");
 });
 
-// --- MED-32: Reset (from any of the 3 states) -----------------------------
+// --- MED-32: Reset (from either state) ------------------------------------
 
-test("shows a per-card Reset control, visible and usable from every state (Active, Cooldown, and Paused)", async ({
+test("shows a per-card Reset control, visible and usable from every state (Active or Cooldown)", async ({
   page,
 }) => {
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
@@ -1017,36 +950,6 @@ test("Reset from a running Cooldown overwrites it with a brand-new full-length c
   await expect(page.getByText("8h of 8h remaining")).toBeVisible();
   const item = page.locator(".medication-item");
   await expect(item).toHaveClass(/cooldown/);
-  await expect(item).not.toHaveClass(/paused/);
-});
-
-test("Reset from Paused overwrites it with a brand-new full-length cooldown and clears the paused residue (MED-32 AC4 regression)", async ({
-  page,
-}) => {
-  await installFrozenClock(page);
-
-  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
-  await cardTapTarget(page, "Aspirin").click();
-  await advanceAndFreeze(page, 6 * 60 * 60 * 1000);
-  await cardTapTarget(page, "Aspirin").click(); // pause with 2h left
-
-  await page.getByRole("button", { name: "Reset Aspirin cooldown" }).click();
-
-  const item = page.locator(".medication-item");
-  await expect(item).toHaveClass(/cooldown/);
-  await expect(item).not.toHaveClass(/paused/);
-  await expect(page.getByText("8h of 8h remaining")).toBeVisible();
-  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Pause Aspirin cooldown");
-
-  const stored = await page.evaluate(() =>
-    JSON.parse(window.localStorage.getItem("medications"))
-  );
-  expect(stored[0].pausedRemainingMs).toBeNull();
-
-  // The card must not still be pausable-into-a-broken-state: tapping now
-  // pauses this *new* cooldown normally.
-  await cardTapTarget(page, "Aspirin").click();
-  await expect(item).toHaveClass(/paused/);
 });
 
 test("Reset moves focus to the Reset button itself and announces the reset", async ({ page }) => {
@@ -1304,9 +1207,9 @@ test("focus stays trapped inside the Edit modal while open (MED-17 AC9)", async 
 
   await page.getByRole("button", { name: "Edit Aspirin" }).click();
 
-  // The Edit dialog has 6 tab stops while Active (close, Name, Dose,
-  // Interval, Cancel, Save — Revert-to-Active is `hidden` and so not
-  // tab-reachable in this state). Chromium briefly moves
+  // The Edit dialog has 6 tab stops (close, Name, Dose, Interval, Cancel,
+  // Save — MED-34 removed the Revert-to-Active control this dialog briefly
+  // had). Chromium briefly moves
   // `document.activeElement` to <body> for exactly one Tab press whenever
   // Tab wraps past the last focusable element back to the first (native
   // <dialog> behavior, not something this app's markup/JS controls) — a tab
@@ -1418,7 +1321,7 @@ test("editing one medication's Name/Dose/Interval does not affect another medica
   await page.getByRole("button", { name: "Save changes" }).click();
 
   await expect(page.getByText("Ibuprofen — 200mg")).toBeVisible();
-  await expect(cardTapTarget(page, "Ibuprofen")).toHaveAccessibleName("Pause Ibuprofen cooldown");
+  await expect(cardTapTarget(page, "Ibuprofen")).toHaveAccessibleName("Cancel Ibuprofen cooldown");
 
   const stored = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("medications"))
@@ -1452,118 +1355,23 @@ test("shows an inline error and does not close the modal when the localStorage w
   await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
 });
 
-// --- MED-32: Revert to Active (inside the Edit dialog) --------------------
-
-test("the Revert to Active control is hidden while the medication is Active", async ({
+// MED-34: the Edit dialog's "Revert to Active" control (MED-32) is removed
+// entirely — tapping a Cooldown card does the same job now (see the
+// tap-to-cancel tests above), so there is no dedicated dialog control left
+// to test here.
+test("the Edit dialog no longer has a Revert to Active control, in either Active or Cooldown state (MED-34)", async ({
   page,
 }) => {
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
   await page.getByRole("button", { name: "Edit Aspirin" }).click();
   const editDialog = page.getByRole("dialog", { name: "Edit medication" });
-  await expect(editDialog.getByRole("button", { name: "Revert to Active" })).toBeHidden();
-});
+  await expect(editDialog.getByRole("button", { name: "Revert to Active" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Cancel" }).click();
 
-test("the Revert to Active control is shown while in a running Cooldown, and reverting cancels it immediately (MED-32, resolved replacement for Stop)", async ({
-  page,
-}) => {
-  await page.clock.install();
-  await page.reload();
-
-  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
   await cardTapTarget(page, "Aspirin").click();
-  await page.clock.fastForward(5 * 60 * 1000);
-
   await page.getByRole("button", { name: "Edit Aspirin" }).click();
-  const editDialog = page.getByRole("dialog", { name: "Edit medication" });
-  const revertButton = editDialog.getByRole("button", { name: "Revert to Active" });
-  await expect(revertButton).toBeVisible();
-
-  await clickAndAwaitEditDialogClose(page, "Revert to Active");
-
-  await expect(editDialog).not.toBeVisible();
-  const item = page.locator(".medication-item");
-  await expect(item).toHaveClass(/active/);
-  await expect(item).not.toHaveClass(/cooldown/);
-  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Log Aspirin dose now");
-
-  const stored = await page.evaluate(() =>
-    JSON.parse(window.localStorage.getItem("medications"))
-  );
-  expect(stored[0].lastTakenAt).toBeNull();
-});
-
-test("the Revert to Active control is also shown while Paused, and reverting from Paused correctly returns to Active (not stuck)", async ({
-  page,
-}) => {
-  await installFrozenClock(page);
-
-  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
-  await cardTapTarget(page, "Aspirin").click();
-  await advanceAndFreeze(page, 2 * 60 * 60 * 1000);
-  await cardTapTarget(page, "Aspirin").click(); // pause
-
-  await page.getByRole("button", { name: "Edit Aspirin" }).click();
-  const editDialog = page.getByRole("dialog", { name: "Edit medication" });
-  await expect(editDialog.getByRole("button", { name: "Revert to Active" })).toBeVisible();
-
-  await clickAndAwaitEditDialogClose(page, "Revert to Active");
-
-  const item = page.locator(".medication-item");
-  await expect(item).toHaveClass(/active/);
-  await expect(item).not.toHaveClass(/cooldown/);
-  await expect(item).not.toHaveClass(/paused/);
-  await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Log Aspirin dose now");
-
-  const stored = await page.evaluate(() =>
-    JSON.parse(window.localStorage.getItem("medications"))
-  );
-  expect(stored[0].lastTakenAt).toBeNull();
-  // The critical regression this guards: pausedRemainingMs must also be
-  // cleared, or the medication would still read as paused forever.
-  expect(stored[0].pausedRemainingMs).toBeNull();
-
-  // Confirm it's genuinely usable again, not just visually Active: tapping
-  // now logs a fresh dose rather than doing nothing.
-  await cardTapTarget(page, "Aspirin").click();
-  await expect(item).toHaveClass(/cooldown/);
-});
-
-test("reverting to Active returns focus to that row's Edit control and announces the change", async ({
-  page,
-}) => {
-  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
-  await cardTapTarget(page, "Aspirin").click();
-
-  const editButton = page.getByRole("button", { name: "Edit Aspirin" });
-  await editButton.click();
-  await clickAndAwaitEditDialogClose(page, "Revert to Active");
-
-  await expect(editButton).toBeFocused();
-  await expect(page.getByRole("status")).toHaveText("Aspirin reverted to Active.");
-});
-
-test("shows an inline error inside the Edit dialog and leaves the cooldown running when the localStorage write fails on Revert to Active", async ({
-  page,
-}) => {
-  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
-  await cardTapTarget(page, "Aspirin").click();
-
-  await page.evaluate(() => {
-    window.localStorage.setItem = () => {
-      throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
-    };
-  });
-
-  await page.getByRole("button", { name: "Edit Aspirin" }).click();
-  const editDialog = page.getByRole("dialog", { name: "Edit medication" });
-  await editDialog.getByRole("button", { name: "Revert to Active" }).click();
-
-  await expect(editDialog).toBeVisible();
-  await expect(editDialog.getByRole("alert")).toHaveText(
-    "Could not revert to Active — please try again."
-  );
-  await expect(page.locator(".medication-item")).toHaveClass(/cooldown/);
+  await expect(editDialog.getByRole("button", { name: "Revert to Active" })).toHaveCount(0);
 });
 
 // --- MED-22: responsive grid -------------------------------------------
@@ -2007,7 +1815,7 @@ test("deleting one medication leaves every other medication's data and displayed
 
   await cardTapTarget(page, "Paracetamol").click();
   await expect(cardTapTarget(page, "Paracetamol")).toHaveAccessibleName(
-    "Pause Paracetamol cooldown"
+    "Cancel Paracetamol cooldown"
   );
 
   await page.getByRole("button", { name: "Delete Aspirin" }).click();

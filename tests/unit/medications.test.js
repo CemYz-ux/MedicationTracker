@@ -11,15 +11,13 @@ import {
   validateNameAndDose,
   logDose,
   stopCooldown,
-  pauseCooldown,
-  resumeCooldown,
-  isPaused,
   isInCooldown,
   getCooldownRemainingMs,
   getCooldownTotalMs,
   getCooldownProgress,
   formatDuration,
   formatCountdown,
+  formatIntervalLabel,
   formatCurrentDate,
 } from "../../js/medications.js";
 
@@ -188,10 +186,9 @@ describe("addMedication", () => {
     expect(result[0].id).toBeTruthy();
   });
 
-  it("seeds pausedRemainingMs as null (MED-32) — not paused until explicitly paused", () => {
+  it("does not seed a pausedRemainingMs field (MED-34 — the Paused state and its field are gone entirely)", () => {
     const result = addMedication([], { name: "Aspirin", dose: "100mg", intervalHours: 8 });
-    expect(result[0].pausedRemainingMs).toBeNull();
-    expect(isPaused(result[0])).toBe(false);
+    expect(result[0]).not.toHaveProperty("pausedRemainingMs");
   });
 
   it("stores intervalHours as a number even when given a numeric string", () => {
@@ -992,299 +989,22 @@ describe("formatCurrentDate", () => {
   });
 });
 
-// --- MED-32: pause/resume/reset a cooldown --------------------------------
+// --- MED-34: revert Paused (MED-32) to tap-to-cancel; add interval readout -
 
-describe("isPaused", () => {
-  it("is false when pausedRemainingMs is null", () => {
-    expect(isPaused({ id: "1", pausedRemainingMs: null })).toBe(false);
+describe("the Paused state is fully removed, not just unreachable (MED-34 AC4)", () => {
+  it("pauseCooldown, resumeCooldown, and isPaused are no longer exported", async () => {
+    const module = await import("../../js/medications.js");
+    expect(module.pauseCooldown).toBeUndefined();
+    expect(module.resumeCooldown).toBeUndefined();
+    expect(module.isPaused).toBeUndefined();
   });
 
-  it("is false when pausedRemainingMs is absent entirely (legacy record)", () => {
-    expect(isPaused({ id: "1" })).toBe(false);
+  it("addMedication no longer seeds a pausedRemainingMs field", () => {
+    const [result] = addMedication([], { name: "Aspirin", dose: "100mg", intervalHours: 8 });
+    expect(result).not.toHaveProperty("pausedRemainingMs");
   });
 
-  it("is true when pausedRemainingMs is a number, including zero", () => {
-    expect(isPaused({ id: "1", pausedRemainingMs: 60_000 })).toBe(true);
-    expect(isPaused({ id: "1", pausedRemainingMs: 0 })).toBe(true);
-  });
-});
-
-describe("pauseCooldown (MED-32)", () => {
-  function cooldownMed(overrides = {}) {
-    const takenAt = new Date("2026-07-12T00:00:00.000Z").getTime();
-    return {
-      id: "1",
-      name: "Aspirin",
-      dose: "100mg",
-      intervalHours: 8,
-      cooldownIntervalHours: 8,
-      lastTakenAt: new Date(takenAt).toISOString(),
-      pausedRemainingMs: null,
-      ...overrides,
-    };
-  }
-
-  it("freezes the exact remaining time into pausedRemainingMs, without touching lastTakenAt or cooldownIntervalHours", () => {
-    const takenAt = new Date("2026-07-12T00:00:00.000Z").getTime();
-    const med = cooldownMed();
-    const twoHoursIn = takenAt + 2 * 60 * 60 * 1000;
-
-    const [result] = pauseCooldown([med], "1", twoHoursIn);
-
-    expect(result.pausedRemainingMs).toBe(6 * 60 * 60 * 1000);
-    expect(result.lastTakenAt).toBe(med.lastTakenAt);
-    expect(result.cooldownIntervalHours).toBe(8);
-  });
-
-  it("isInCooldown/getCooldownRemainingMs/getCooldownProgress/formatCountdown all reflect the frozen value immediately after pausing", () => {
-    const takenAt = new Date("2026-07-12T00:00:00.000Z").getTime();
-    const med = cooldownMed();
-    const twoHoursIn = takenAt + 2 * 60 * 60 * 1000;
-
-    const [paused] = pauseCooldown([med], "1", twoHoursIn);
-
-    expect(isInCooldown(paused, twoHoursIn)).toBe(true);
-    expect(getCooldownRemainingMs(paused, twoHoursIn)).toBe(6 * 60 * 60 * 1000);
-    expect(getCooldownProgress(paused, twoHoursIn)).toBeCloseTo(0.75);
-    expect(formatCountdown(paused, twoHoursIn)).toBe("6h of 8h remaining");
-  });
-
-  it("is a no-op when the medication is not currently in cooldown (Active)", () => {
-    const active = [
-      { id: "1", name: "Aspirin", dose: "100mg", intervalHours: 8, lastTakenAt: null, pausedRemainingMs: null },
-    ];
-    expect(pauseCooldown(active, "1")).toEqual(active);
-  });
-
-  it("is a no-op when already paused — does not re-capture a smaller remaining value on top of the frozen one", () => {
-    const takenAt = new Date("2026-07-12T00:00:00.000Z").getTime();
-    const med = cooldownMed({ pausedRemainingMs: 5 * 60 * 60 * 1000 });
-    const muchLater = takenAt + 7 * 60 * 60 * 1000;
-
-    const [result] = pauseCooldown([med], "1", muchLater);
-
-    expect(result.pausedRemainingMs).toBe(5 * 60 * 60 * 1000);
-  });
-
-  it("is a no-op when the id does not match any medication", () => {
-    const med = cooldownMed();
-    expect(pauseCooldown([med], "nope")).toEqual([med]);
-  });
-
-  it("does not affect other medications in the list", () => {
-    const takenAt = new Date("2026-07-12T00:00:00.000Z").getTime();
-    const other = cooldownMed({ id: "2", name: "Ibuprofen" });
-    const med = cooldownMed();
-    const twoHoursIn = takenAt + 2 * 60 * 60 * 1000;
-
-    const result = pauseCooldown([med, other], "1", twoHoursIn);
-
-    expect(result[1]).toEqual(other);
-  });
-
-  it("does not mutate the original list", () => {
-    const takenAt = new Date("2026-07-12T00:00:00.000Z").getTime();
-    const med = cooldownMed();
-    pauseCooldown([med], "1", takenAt + 2 * 60 * 60 * 1000);
-    expect(med.pausedRemainingMs).toBeNull();
-  });
-});
-
-describe("resumeCooldown (MED-32)", () => {
-  it("backdates lastTakenAt so the resumed cooldown counts down from exactly the frozen remaining time", () => {
-    const med = {
-      id: "1",
-      name: "Aspirin",
-      dose: "100mg",
-      intervalHours: 8,
-      cooldownIntervalHours: 8,
-      lastTakenAt: new Date("2026-07-12T00:00:00.000Z").toISOString(),
-      pausedRemainingMs: 6 * 60 * 60 * 1000, // paused with 6h left of an 8h cooldown
-    };
-    const resumeAt = new Date("2026-07-13T00:00:00.000Z").getTime(); // a day later, in real time
-
-    const [result] = resumeCooldown([med], "1", resumeAt);
-
-    expect(result.pausedRemainingMs).toBeNull();
-    expect(getCooldownRemainingMs(result, resumeAt)).toBe(6 * 60 * 60 * 1000);
-    expect(isInCooldown(result, resumeAt)).toBe(true);
-
-    // Exactly 6h after resuming, the cooldown ends — proving it counts down
-    // from the frozen remainder, not from a restarted 8h or from whatever
-    // real time actually elapsed while paused.
-    const sixHoursAfterResume = resumeAt + 6 * 60 * 60 * 1000;
-    expect(isInCooldown(result, sixHoursAfterResume)).toBe(false);
-    expect(isInCooldown(result, sixHoursAfterResume - 1)).toBe(true);
-  });
-
-  it("uses the medication's snapshotted cooldownIntervalHours for the resume math, not a live intervalHours edited while paused (MED-8 invariant)", () => {
-    const med = {
-      id: "1",
-      name: "Aspirin",
-      dose: "100mg",
-      intervalHours: 2, // edited down from 8 while paused
-      cooldownIntervalHours: 8, // the snapshot from when GO was originally pressed
-      lastTakenAt: new Date("2026-07-12T00:00:00.000Z").toISOString(),
-      pausedRemainingMs: 6 * 60 * 60 * 1000,
-    };
-    const resumeAt = new Date("2026-07-12T05:00:00.000Z").getTime();
-
-    const [result] = resumeCooldown([med], "1", resumeAt);
-
-    // Still 6h remaining against the *original* 8h total, not recomputed
-    // against the edited 2h value.
-    expect(getCooldownRemainingMs(result, resumeAt)).toBe(6 * 60 * 60 * 1000);
-    expect(getCooldownTotalMs(result)).toBe(8 * 60 * 60 * 1000);
-  });
-
-  it("is a no-op when the medication is not currently paused", () => {
-    const running = [
-      {
-        id: "1",
-        name: "Aspirin",
-        dose: "100mg",
-        intervalHours: 8,
-        cooldownIntervalHours: 8,
-        lastTakenAt: new Date("2026-07-12T00:00:00.000Z").toISOString(),
-        pausedRemainingMs: null,
-      },
-    ];
-    expect(resumeCooldown(running, "1")).toEqual(running);
-  });
-
-  it("is a no-op when the id does not match any medication", () => {
-    const med = {
-      id: "1",
-      pausedRemainingMs: 60_000,
-      lastTakenAt: new Date().toISOString(),
-      cooldownIntervalHours: 1,
-    };
-    expect(resumeCooldown([med], "nope")).toEqual([med]);
-  });
-
-  it("does not affect other medications in the list", () => {
-    const paused = {
-      id: "1",
-      name: "Aspirin",
-      intervalHours: 8,
-      cooldownIntervalHours: 8,
-      lastTakenAt: new Date("2026-07-12T00:00:00.000Z").toISOString(),
-      pausedRemainingMs: 6 * 60 * 60 * 1000,
-    };
-    const other = {
-      id: "2",
-      name: "Ibuprofen",
-      intervalHours: 6,
-      cooldownIntervalHours: 6,
-      lastTakenAt: new Date("2026-07-12T00:00:00.000Z").toISOString(),
-      pausedRemainingMs: 3 * 60 * 60 * 1000,
-    };
-
-    const result = resumeCooldown([paused, other], "1", Date.now());
-
-    expect(result[1]).toEqual(other);
-    expect(isPaused(result[1])).toBe(true);
-  });
-
-  it("does not mutate the original list", () => {
-    const med = {
-      id: "1",
-      intervalHours: 8,
-      cooldownIntervalHours: 8,
-      lastTakenAt: new Date("2026-07-12T00:00:00.000Z").toISOString(),
-      pausedRemainingMs: 6 * 60 * 60 * 1000,
-    };
-    resumeCooldown([med], "1", Date.now());
-    expect(med.pausedRemainingMs).toBe(6 * 60 * 60 * 1000);
-  });
-});
-
-describe("a paused medication never auto-reactivates, no matter how much real time passes (MED-9/MED-10 guarantee through MED-32 pausing)", () => {
-  it("isInCooldown stays true many days past when the original cooldown would have elapsed", () => {
-    const med = {
-      id: "1",
-      name: "Aspirin",
-      intervalHours: 1,
-      cooldownIntervalHours: 1,
-      lastTakenAt: new Date("2026-07-01T00:00:00.000Z").toISOString(),
-      pausedRemainingMs: 30 * 60 * 1000, // paused with 30 minutes left of a 1h cooldown
-    };
-    const thirtyDaysLater =
-      new Date("2026-07-01T00:00:00.000Z").getTime() + 30 * 24 * 60 * 60 * 1000;
-
-    expect(isInCooldown(med, thirtyDaysLater)).toBe(true);
-    expect(getCooldownRemainingMs(med, thirtyDaysLater)).toBe(30 * 60 * 1000);
-    expect(getCooldownProgress(med, thirtyDaysLater)).toBeCloseTo(0.5);
-  });
-
-  it("even a corrupted/unparseable lastTakenAt does not break the paused short-circuit", () => {
-    const med = {
-      id: "1",
-      intervalHours: 1,
-      cooldownIntervalHours: 1,
-      lastTakenAt: "not-a-valid-date",
-      pausedRemainingMs: 60_000,
-    };
-    expect(() => isInCooldown(med, Date.now())).not.toThrow();
-    expect(isInCooldown(med, Date.now())).toBe(true);
-    expect(getCooldownRemainingMs(med, Date.now())).toBe(60_000);
-  });
-});
-
-describe("logDose clears pausedRemainingMs (MED-32 AC4 — Reset from Paused regression guard)", () => {
-  it("clears a stale paused snapshot when logDose (Reset, or a fresh tap-on-Active) is called", () => {
-    const now = new Date("2026-07-12T00:00:00.000Z").getTime();
-    const med = {
-      id: "1",
-      name: "Aspirin",
-      intervalHours: 8,
-      cooldownIntervalHours: 8,
-      lastTakenAt: new Date("2026-07-11T20:00:00.000Z").toISOString(),
-      pausedRemainingMs: 4 * 60 * 60 * 1000,
-    };
-
-    const [result] = logDose([med], "1", now);
-
-    expect(result.pausedRemainingMs).toBeNull();
-    expect(result.lastTakenAt).toBe(new Date(now).toISOString());
-    expect(result.cooldownIntervalHours).toBe(8);
-    // A fresh full-length cooldown, not the stale paused fraction.
-    expect(getCooldownRemainingMs(result, now)).toBe(8 * 60 * 60 * 1000);
-    expect(isPaused(result)).toBe(false);
-  });
-
-  it("is inert for an ordinary (never-paused) logDose — pausedRemainingMs stays null", () => {
-    const med = { id: "1", name: "Aspirin", intervalHours: 8, lastTakenAt: null, pausedRemainingMs: null };
-    const [result] = logDose([med], "1", Date.now());
-    expect(result.pausedRemainingMs).toBeNull();
-  });
-});
-
-describe("stopCooldown clears pausedRemainingMs (MED-32 — Revert to Active from a Paused medication)", () => {
-  it("reverting a Paused medication clears pausedRemainingMs, not just lastTakenAt/cooldownIntervalHours", () => {
-    const med = {
-      id: "1",
-      name: "Aspirin",
-      intervalHours: 8,
-      cooldownIntervalHours: 8,
-      lastTakenAt: new Date("2026-07-12T00:00:00.000Z").toISOString(),
-      pausedRemainingMs: 4 * 60 * 60 * 1000,
-    };
-    const now = Date.now();
-
-    const [result] = stopCooldown([med], "1", now);
-
-    expect(result.lastTakenAt).toBeNull();
-    expect(result.cooldownIntervalHours).toBeNull();
-    expect(result.pausedRemainingMs).toBeNull();
-    // The critical regression this guards: without clearing pausedRemainingMs
-    // too, isInCooldown's paused short-circuit would keep reading `true`
-    // forever, even though lastTakenAt just went back to null.
-    expect(isInCooldown(result, now)).toBe(false);
-    expect(isPaused(result)).toBe(false);
-  });
-
-  it("still correctly reverts an ordinary running (unpaused) cooldown, unaffected by the pausedRemainingMs clear", () => {
+  it("stopCooldown no longer writes a pausedRemainingMs field", () => {
     const takenAt = new Date("2026-07-12T00:00:00.000Z").getTime();
     const med = {
       id: "1",
@@ -1292,106 +1012,111 @@ describe("stopCooldown clears pausedRemainingMs (MED-32 — Revert to Active fro
       intervalHours: 8,
       cooldownIntervalHours: 8,
       lastTakenAt: new Date(takenAt).toISOString(),
-      pausedRemainingMs: null,
+    };
+    const [result] = stopCooldown([med], "1", takenAt + 60 * 60 * 1000);
+    expect(result).not.toHaveProperty("pausedRemainingMs");
+  });
+});
+
+describe("a leftover pausedRemainingMs field from before MED-34 is inert (AC5 — no migration, just ignored)", () => {
+  it("isInCooldown ignores a stale pausedRemainingMs on a never-logged (Active) legacy record", () => {
+    const legacyActive = {
+      id: "1",
+      name: "Aspirin",
+      intervalHours: 8,
+      lastTakenAt: null,
+      pausedRemainingMs: 4 * 60 * 60 * 1000, // stale value from before this story shipped
+    };
+    expect(isInCooldown(legacyActive, Date.now())).toBe(false);
+  });
+
+  it("isInCooldown/getCooldownRemainingMs derive from lastTakenAt as usual on a running-cooldown legacy record, regardless of a stale pausedRemainingMs value", () => {
+    const takenAt = new Date("2026-07-12T00:00:00.000Z").getTime();
+    const legacyRunning = {
+      id: "1",
+      name: "Aspirin",
+      intervalHours: 8,
+      cooldownIntervalHours: 8,
+      lastTakenAt: new Date(takenAt).toISOString(),
+      pausedRemainingMs: 30 * 60 * 1000, // stale — well under the real remaining time
+    };
+    const twoHoursIn = takenAt + 2 * 60 * 60 * 1000;
+
+    expect(isInCooldown(legacyRunning, twoHoursIn)).toBe(true);
+    // Reflects the real elapsed time (6h remaining of 8h), not the stale
+    // pausedRemainingMs (30m) that would have been read pre-MED-34.
+    expect(getCooldownRemainingMs(legacyRunning, twoHoursIn)).toBe(6 * 60 * 60 * 1000);
+  });
+
+  it("isInCooldown correctly reactivates a legacy record with a stale pausedRemainingMs once its real interval has elapsed", () => {
+    const takenAt = new Date("2026-07-01T00:00:00.000Z").getTime();
+    const legacy = {
+      id: "1",
+      name: "Aspirin",
+      intervalHours: 1,
+      cooldownIntervalHours: 1,
+      lastTakenAt: new Date(takenAt).toISOString(),
+      pausedRemainingMs: 30 * 60 * 1000, // this field pre-MED-34 would have kept this "paused" forever
+    };
+    const thirtyDaysLater = takenAt + 30 * 24 * 60 * 60 * 1000;
+
+    expect(isInCooldown(legacy, thirtyDaysLater)).toBe(false);
+    expect(getCooldownRemainingMs(legacy, thirtyDaysLater)).toBe(0);
+    expect(getCooldownProgress(legacy, thirtyDaysLater)).toBe(0);
+  });
+});
+
+describe("tapping a Cooldown medication cancels immediately and reverts to Active (MED-34 AC2 — reuses stopCooldown, not reimplemented)", () => {
+  it("stopCooldown cancels a running cooldown the same way regardless of MED-32's now-removed Paused state ever having existed", () => {
+    const takenAt = new Date("2026-07-12T00:00:00.000Z").getTime();
+    const med = {
+      id: "1",
+      name: "Aspirin",
+      intervalHours: 8,
+      cooldownIntervalHours: 8,
+      lastTakenAt: new Date(takenAt).toISOString(),
     };
     const oneHourIn = takenAt + 60 * 60 * 1000;
+    expect(isInCooldown(med, oneHourIn)).toBe(true);
 
     const [result] = stopCooldown([med], "1", oneHourIn);
 
     expect(result.lastTakenAt).toBeNull();
-    expect(result.pausedRemainingMs).toBeNull();
     expect(isInCooldown(result, oneHourIn)).toBe(false);
   });
-});
 
-describe("editing Name/Dose/Interval never disturbs pausedRemainingMs (MED-17/MED-5 non-disturbance invariant extended to MED-32 Paused state)", () => {
-  const pausedMed = () => ({
-    id: "1",
-    name: "Aspirin",
-    dose: "100mg",
-    intervalHours: 8,
-    cooldownIntervalHours: 8,
-    lastTakenAt: new Date("2026-07-12T00:00:00.000Z").toISOString(),
-    pausedRemainingMs: 3 * 60 * 60 * 1000,
-  });
-
-  it("updateMedicationDetails (Name/Dose) leaves pausedRemainingMs completely untouched", () => {
-    const [result] = updateMedicationDetails([pausedMed()], "1", {
-      name: "Buffered Aspirin",
-      dose: "150mg",
-    });
-    expect(result.pausedRemainingMs).toBe(3 * 60 * 60 * 1000);
-    expect(isPaused(result)).toBe(true);
-  });
-
-  it("updateMedicationInterval leaves pausedRemainingMs completely untouched — only affects a future resume/reset, never the frozen value", () => {
-    const [result] = updateMedicationInterval([pausedMed()], "1", 2);
-    expect(result.pausedRemainingMs).toBe(3 * 60 * 60 * 1000);
-    // The frozen remaining time is still read as-is...
-    expect(getCooldownRemainingMs(result, Date.now())).toBe(3 * 60 * 60 * 1000);
-    // ...while the edited intervalHours sits ready to govern a future
-    // Reset/fresh GO press, and cooldownIntervalHours (what a *resume* would
-    // use) is untouched by this edit too.
-    expect(result.intervalHours).toBe(2);
-    expect(result.cooldownIntervalHours).toBe(8);
+  it("natural interval elapse still reverts Cooldown to Active on its own, untouched by MED-34 (MED-9/MED-10)", () => {
+    const now = new Date("2026-07-12T00:00:00.000Z").getTime();
+    const med = {
+      id: "1",
+      name: "Aspirin",
+      intervalHours: 1,
+      cooldownIntervalHours: 1,
+      lastTakenAt: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+    };
+    expect(isInCooldown(med, now)).toBe(false);
   });
 });
 
-describe("multi-medication independence for pause/resume/reset/revert (MED-32)", () => {
-  it("pausing one medication never affects another's pausedRemainingMs or cooldown state", () => {
-    const takenAt = new Date("2026-07-12T00:00:00.000Z").getTime();
-    const meds = [
-      {
-        id: "1",
-        name: "Aspirin",
-        intervalHours: 8,
-        cooldownIntervalHours: 8,
-        lastTakenAt: new Date(takenAt).toISOString(),
-        pausedRemainingMs: null,
-      },
-      {
-        id: "2",
-        name: "Ibuprofen",
-        intervalHours: 6,
-        cooldownIntervalHours: 6,
-        lastTakenAt: new Date(takenAt).toISOString(),
-        pausedRemainingMs: null,
-      },
-    ];
-    const twoHoursIn = takenAt + 2 * 60 * 60 * 1000;
-
-    const result = pauseCooldown(meds, "1", twoHoursIn);
-
-    expect(isPaused(result[0])).toBe(true);
-    expect(isPaused(result[1])).toBe(false);
-    expect(isInCooldown(result[1], twoHoursIn)).toBe(true);
-    expect(result[1]).toEqual(meds[1]);
+describe("formatIntervalLabel (MED-34)", () => {
+  it('formats a whole-hour interval as "Every Xh"', () => {
+    expect(formatIntervalLabel(8)).toBe("Every 8h");
+    expect(formatIntervalLabel(1)).toBe("Every 1h");
   });
 
-  it("resetting (logDose) one medication never clears another's pausedRemainingMs", () => {
-    const takenAt = new Date("2026-07-12T00:00:00.000Z").getTime();
-    const meds = [
-      {
-        id: "1",
-        name: "Aspirin",
-        intervalHours: 8,
-        cooldownIntervalHours: 8,
-        lastTakenAt: new Date(takenAt).toISOString(),
-        pausedRemainingMs: null,
-      },
-      {
-        id: "2",
-        name: "Ibuprofen",
-        intervalHours: 6,
-        cooldownIntervalHours: 6,
-        lastTakenAt: new Date(takenAt).toISOString(),
-        pausedRemainingMs: 2 * 60 * 60 * 1000,
-      },
-    ];
+  it('formats a fractional interval as "Every Xh Ym"', () => {
+    expect(formatIntervalLabel(4.5)).toBe("Every 4h 30m");
+  });
 
-    const result = logDose(meds, "1", takenAt + 60 * 60 * 1000);
+  it('formats a sub-hour interval as "Every Ym"', () => {
+    expect(formatIntervalLabel(0.5)).toBe("Every 30m");
+  });
 
-    expect(result[1]).toEqual(meds[1]);
-    expect(isPaused(result[1])).toBe(true);
+  it("reflects the live intervalHours, not a cooldown snapshot — it takes a raw number, not a medication object", () => {
+    // Distinct from formatCountdown's "of Wh remaining" segment, which reads
+    // cooldownIntervalHours instead — this readout is deliberately a plain
+    // number-in, string-out function so callers always pass the medication's
+    // *current* intervalHours (see js/app.js's updateCooldownDisplay).
+    expect(formatIntervalLabel(6)).toBe("Every 6h");
   });
 });
