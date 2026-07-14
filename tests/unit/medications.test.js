@@ -17,6 +17,7 @@ import {
   getCooldownProgress,
   formatDuration,
   formatCountdown,
+  formatRemainingLabel,
   formatIntervalLabel,
   formatCurrentDate,
 } from "../../js/medications.js";
@@ -973,6 +974,47 @@ describe("formatCountdown", () => {
       lastTakenAt: null,
     };
     expect(formatCountdown(med, Date.now())).toBeNull();
+  });
+});
+
+describe("formatRemainingLabel (MED-33)", () => {
+  it('formats as "{remaining} left", with seconds, using the same remaining-time math as formatCountdown', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const med = {
+      id: "1",
+      name: "Aspirin",
+      dose: "100mg",
+      intervalHours: 5,
+      cooldownIntervalHours: 5,
+      lastTakenAt: new Date(takenAt).toISOString(),
+    };
+    const now = takenAt + (1 * 3600 + 47 * 60 + 15) * 1000; // 3h12m45s left
+    expect(formatRemainingLabel(med, now)).toBe("3h 12m 45s left");
+  });
+
+  it("never includes the total-interval segment formatCountdown's longer wording uses", () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const med = {
+      id: "1",
+      name: "Aspirin",
+      dose: "100mg",
+      intervalHours: 1,
+      cooldownIntervalHours: 1,
+      lastTakenAt: new Date(takenAt).toISOString(),
+    };
+    const now = takenAt + (1 * 3600 - 45) * 1000; // 45s left of a 1h cooldown
+    expect(formatRemainingLabel(med, now)).toBe("45s left");
+  });
+
+  it("returns null when the medication is not in cooldown, mirroring formatCountdown's contract", () => {
+    const med = {
+      id: "1",
+      name: "Aspirin",
+      dose: "100mg",
+      intervalHours: 5,
+      lastTakenAt: null,
+    };
+    expect(formatRemainingLabel(med, Date.now())).toBeNull();
   });
 });
 

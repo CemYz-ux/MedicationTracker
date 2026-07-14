@@ -16,6 +16,24 @@ function cardTapTarget(page, name) {
   return page.locator(".medication-item", { hasText: name }).locator(".card-tap-target");
 }
 
+// MED-33: name and dose now render as separate, stacked text nodes
+// (`.medication-name` above `.medication-dose`) rather than a single
+// "Name — Dose" line, so a single `getByText("Name — Dose")` locator can no
+// longer find them (no one element's text content matches that whole
+// string anymore). These two helpers re-create the old "this row shows
+// these values" / "this row is gone" checks against the new markup.
+function expectMedicationVisible(page, name, dose) {
+  const card = page.locator(".medication-item", { hasText: name });
+  return Promise.all([
+    expect(card.locator(".medication-name")).toHaveText(name),
+    expect(card.locator(".medication-dose")).toHaveText(dose),
+  ]);
+}
+
+function expectMedicationHidden(page, name) {
+  return expect(page.locator(".medication-item", { hasText: name })).toBeHidden();
+}
+
 async function addMedicationViaUi(page, { name, dose, interval }) {
   const trigger = page.locator("#add-medication-fab");
   await trigger.click();
@@ -214,8 +232,10 @@ test("adds a valid medication and shows it in the list", async ({ page }) => {
   await dialog.getByRole("button", { name: "Add medication", exact: true }).click();
 
   await expect(dialog).not.toBeVisible();
-  await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
-  await expect(page.getByText("No medications yet — add one to get started.")).toBeHidden();
+  await expectMedicationVisible(page, "Aspirin", "100mg");
+  await expect(
+    page.getByText("No medications yet — add one to get started.")
+  ).toBeHidden();
 });
 
 test("the Add dialog's fields are reset (not just hidden) after a successful submit, so a later add doesn't leak stale values (MED-15)", async ({
@@ -229,7 +249,7 @@ test("the Add dialog's fields are reset (not just hidden) after a successful sub
   await dialog.getByRole("button", { name: "Add medication", exact: true }).click();
 
   await expect(dialog).not.toBeVisible();
-  await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
+  await expectMedicationVisible(page, "Aspirin", "100mg");
 
   await page.locator("#add-medication-fab").click();
 
@@ -247,7 +267,9 @@ test("shows a validation error and keeps the modal open when fields are empty", 
 
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("alert")).not.toBeEmpty();
-  await expect(page.getByText("No medications yet — add one to get started.")).toBeVisible();
+  await expect(
+    page.getByText("No medications yet — add one to get started.")
+  ).toBeVisible();
 });
 
 test("shows a validation error for a non-numeric or non-positive interval", async ({ page }) => {
@@ -262,7 +284,9 @@ test("shows a validation error for a non-numeric or non-positive interval", asyn
   await expect(dialog.getByRole("alert")).toHaveText(
     "Interval (hours) must be a positive number."
   );
-  await expect(page.getByText("No medications yet — add one to get started.")).toBeVisible();
+  await expect(
+    page.getByText("No medications yet — add one to get started.")
+  ).toBeVisible();
 });
 
 test("persists an added medication across a reload", async ({ page }) => {
@@ -275,7 +299,7 @@ test("persists an added medication across a reload", async ({ page }) => {
 
   await page.reload();
 
-  await expect(page.getByText("Ibuprofen — 200mg")).toBeVisible();
+  await expectMedicationVisible(page, "Ibuprofen", "200mg");
 });
 
 test("closing via Cancel discards unsaved input and returns focus to the trigger", async ({
@@ -288,7 +312,9 @@ test("closing via Cancel discards unsaved input and returns focus to the trigger
   await page.getByRole("button", { name: "Cancel" }).click();
 
   await expect(page.locator("#add-medication-dialog")).not.toBeVisible();
-  await expect(page.getByText("No medications yet — add one to get started.")).toBeVisible();
+  await expect(
+    page.getByText("No medications yet — add one to get started.")
+  ).toBeVisible();
   await expect(trigger).toBeFocused();
 });
 
@@ -302,7 +328,9 @@ test("closing via the close control discards unsaved input and returns focus to 
   await page.getByRole("button", { name: "Close" }).click();
 
   await expect(page.locator("#add-medication-dialog")).not.toBeVisible();
-  await expect(page.getByText("No medications yet — add one to get started.")).toBeVisible();
+  await expect(
+    page.getByText("No medications yet — add one to get started.")
+  ).toBeVisible();
   await expect(trigger).toBeFocused();
 });
 
@@ -316,7 +344,9 @@ test("closing via Escape discards unsaved input and returns focus to the trigger
   await page.keyboard.press("Escape");
 
   await expect(page.locator("#add-medication-dialog")).not.toBeVisible();
-  await expect(page.getByText("No medications yet — add one to get started.")).toBeVisible();
+  await expect(
+    page.getByText("No medications yet — add one to get started.")
+  ).toBeVisible();
   await expect(trigger).toBeFocused();
 });
 
@@ -332,7 +362,9 @@ test("closing via a backdrop click discards unsaved input and returns focus to t
   await page.mouse.click(box.x + 2, box.y + 2);
 
   await expect(dialog).not.toBeVisible();
-  await expect(page.getByText("No medications yet — add one to get started.")).toBeVisible();
+  await expect(
+    page.getByText("No medications yet — add one to get started.")
+  ).toBeVisible();
   await expect(trigger).toBeFocused();
 });
 
@@ -536,9 +568,9 @@ test("activating the per-card Edit/Delete/Reset icon buttons never also logs a d
   expect(stored[0].lastTakenAt).toBeNull();
 });
 
-// --- MED-8/MED-29: cooldown countdown + fill (still apply post-MED-32) ---
+// --- MED-8/MED-29/MED-33: cooldown countdown + fill --------------------
 
-test("shows a live countdown in '{remaining} of {total} remaining' format after tapping, and the fill starts at 100%", async ({
+test("shows a live countdown in '{remaining} left' format after tapping, and the fill starts at 100%", async ({
   page,
 }) => {
   await page.clock.install();
@@ -547,7 +579,7 @@ test("shows a live countdown in '{remaining} of {total} remaining' format after 
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
   await cardTapTarget(page, "Aspirin").click();
 
-  await expect(page.getByText("8h of 8h remaining")).toBeVisible();
+  await expect(page.getByText("8h left")).toBeVisible();
 
   const item = page.locator(".medication-item.cooldown");
   await expect(item).toHaveCSS("--progress", "100%");
@@ -565,7 +597,7 @@ test("tapping to log does not change the card's height, even though it reveals c
   const heightBeforeTap = (await item.boundingBox()).height;
 
   await cardTapTarget(page, "Aspirin").click();
-  await expect(page.getByText("8h of 8h remaining")).toBeVisible();
+  await expect(page.getByText("8h left")).toBeVisible();
 
   const heightAfterTap = (await item.boundingBox()).height;
   expect(heightAfterTap).toBe(heightBeforeTap);
@@ -594,7 +626,7 @@ test("the fill recedes proportionally to elapsed cooldown time, and reactivation
 
   await advanceAndFreeze(page, 4 * 60 * 60 * 1000);
   await expect(item).toHaveCSS("--progress", "50%");
-  await expect(page.getByText("4h of 8h remaining")).toBeVisible();
+  await expect(page.getByText("4h left")).toBeVisible();
 
   await advanceAndFreeze(page, 4 * 60 * 60 * 1000 + 60_000);
   await expect(item).toHaveClass(/active/);
@@ -610,13 +642,13 @@ test("the countdown's seconds component ticks live once per second, without wait
 
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "1" });
   await cardTapTarget(page, "Aspirin").click();
-  await expect(page.getByText("1h of 1h remaining")).toBeVisible();
+  await expect(page.getByText("1h left")).toBeVisible();
 
   await advanceAndFreeze(page, 1000);
-  await expect(page.getByText("59m 59s of 1h remaining")).toBeVisible();
+  await expect(page.getByText("59m 59s left")).toBeVisible();
 
   await advanceAndFreeze(page, 1000);
-  await expect(page.getByText("59m 58s of 1h remaining")).toBeVisible();
+  await expect(page.getByText("59m 58s left")).toBeVisible();
 });
 
 test("editing the interval mid-cooldown (via the Edit dialog, MED-32) does not disturb the running countdown/fill (MED-5 invariant)", async ({
@@ -636,22 +668,142 @@ test("editing the interval mid-cooldown (via the Edit dialog, MED-32) does not d
 
   const item = page.locator(".medication-item");
   await expect(item).toHaveClass(/cooldown/);
-  await expect(page.getByText("5h of 8h remaining")).toBeVisible();
+  await expect(page.getByText("5h left")).toBeVisible();
 });
 
-// --- MED-34: always-visible interval ("how often") readout ---------------
+// --- MED-33: compact card redesign (remove pill, shrink card, reposition
+// icon row + countdown text) -----------------------------------------------
 
-test("shows an always-visible interval readout near the name/dose row on an Active card", async ({
+test("Active and Cooldown render at identical card height for the same medication, measured via getBoundingClientRect, not visual inspection alone (MED-33 AC6, extends MED-18)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const item = page.locator(".medication-item");
+  const activeHeight = await item.evaluate((el) => el.getBoundingClientRect().height);
+
+  await cardTapTarget(page, "Aspirin").click();
+  await expect(item).toHaveClass(/cooldown/);
+  const cooldownHeight = await item.evaluate((el) => el.getBoundingClientRect().height);
+  expect(cooldownHeight).toBe(activeHeight);
+
+  // Round-trips back to Active (tap-to-cancel, MED-34) at the same height.
+  await cardTapTarget(page, "Aspirin").click();
+  await expect(item).toHaveClass(/active/);
+  const activeHeightAgain = await item.evaluate((el) => el.getBoundingClientRect().height);
+  expect(activeHeightAgain).toBe(activeHeight);
+});
+
+test("no status pill renders anywhere on the card in either state — state is color-only via active/cooldown classes (MED-33 AC2)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const item = page.locator(".medication-item");
+  await expect(item.locator(".pill")).toHaveCount(0);
+  await expect(page.getByText("Active", { exact: true })).toHaveCount(0);
+
+  await cardTapTarget(page, "Aspirin").click();
+  await expect(item).toHaveClass(/cooldown/);
+  await expect(item.locator(".pill")).toHaveCount(0);
+  await expect(page.getByText("Cooldown", { exact: true })).toHaveCount(0);
+});
+
+test("the remaining-cooldown countdown text renders top-left of the card, not bottom-right (MED-33 AC5, relocated from MED-18)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await cardTapTarget(page, "Aspirin").click();
+
+  const item = page.locator(".medication-item");
+  const itemBox = await item.boundingBox();
+  const countdownBox = await item.locator(".cooldown-countdown").boundingBox();
+
+  expect(countdownBox.x - itemBox.x).toBeLessThan(itemBox.width / 2);
+  expect(countdownBox.y - itemBox.y).toBeLessThan(itemBox.height / 2);
+});
+
+test("Edit/Delete/Reset render together in one row/strip, top-right, sharing it with the countdown text's vertical band rather than the name/dose row (MED-33 AC3)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await cardTapTarget(page, "Aspirin").click();
+
+  const item = page.locator(".medication-item");
+  const itemBox = await item.boundingBox();
+  const countdownBox = await item.locator(".cooldown-countdown").boundingBox();
+  const nameBox = await item.locator(".medication-name").boundingBox();
+  const editBox = await page.getByRole("button", { name: "Edit Aspirin" }).boundingBox();
+  const deleteBox = await page.getByRole("button", { name: "Delete Aspirin" }).boundingBox();
+  const resetBox = await page.getByRole("button", { name: "Reset Aspirin cooldown" }).boundingBox();
+
+  // All three icon buttons sit within a fixed-width band hugging the card's
+  // right edge (3 x 44px buttons + 2 x 8px gaps + the 1.2rem right offset is
+  // ~187px, however wide the card itself renders) and in the card's upper
+  // half...
+  for (const box of [editBox, deleteBox, resetBox]) {
+    expect(itemBox.x + itemBox.width - box.x).toBeLessThan(200);
+    expect(box.y - itemBox.y).toBeLessThan(itemBox.height / 2);
+  }
+  // ...with Reset (the last/rightmost of the three) close to the card's
+  // right edge itself, per `.header-actions`' `right: 1.2rem` offset.
+  expect(itemBox.x + itemBox.width - (resetBox.x + resetBox.width)).toBeLessThan(25);
+  // ...vertically overlapping the same top strip the countdown text occupies
+  // (not a separate row below it)...
+  expect(editBox.y).toBeLessThan(countdownBox.y + countdownBox.height);
+  expect(editBox.y + editBox.height).toBeGreaterThan(countdownBox.y);
+  // ...and entirely above the name/dose row further down the card, not
+  // sharing a flex row with it.
+  expect(editBox.y + editBox.height).toBeLessThanOrEqual(nameBox.y + 1);
+});
+
+test("the compact card does not overflow or clip its content at a narrow ~320-375px viewport, in either state (MED-33 AC9 — spot-check vs. MED-28)", async ({
+  page,
+}) => {
+  // MED-28 (pre-existing, separate follow-up) is about page-level overflow
+  // at this width, not this card's own layout — this test only asserts on
+  // the card itself, so it can't confirm or deny MED-28 either way; it just
+  // confirms this redesign doesn't introduce a *new* overflow of its own.
+  for (const width of [320, 375]) {
+    await page.setViewportSize({ width, height: 800 });
+    await addMedicationViaUi(page, {
+      name: "Amoxicillin Clavulanate Potassium",
+      dose: "875mg/125mg",
+      interval: "8",
+    });
+
+    const item = page.locator(".medication-item");
+    const noHorizontalOverflow = await item.evaluate(
+      (el) => el.scrollWidth <= el.clientWidth + 1
+    );
+    expect(noHorizontalOverflow).toBe(true);
+
+    await cardTapTarget(page, "Amoxicillin Clavulanate Potassium").click();
+    await expect(item).toHaveClass(/cooldown/);
+    const noHorizontalOverflowInCooldown = await item.evaluate(
+      (el) => el.scrollWidth <= el.clientWidth + 1
+    );
+    expect(noHorizontalOverflowInCooldown).toBe(true);
+
+    await page.evaluate(() => window.localStorage.clear());
+    await page.reload();
+  }
+});
+
+// --- MED-33/MED-34: always-visible interval stat (numeral + caption) -----
+
+test("shows an always-visible interval stat (large numeral + HOURS caption) near the name/dose row on an Active card", async ({
   page,
 }) => {
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
   const item = page.locator(".medication-item");
   await expect(item).toHaveClass(/active/);
-  await expect(item.locator(".medication-interval")).toHaveText("Every 8h");
+  await expect(item.locator(".medication-interval-value")).toHaveText("8");
+  await expect(item.locator(".medication-interval-caption")).toHaveText("hours");
 });
 
-test("keeps showing the same interval readout once a card enters Cooldown, distinct from the countdown's own total (MED-34 AC7/AC8)", async ({
+test("keeps showing the same interval stat once a card enters Cooldown, distinct from the countdown text (MED-33/MED-34)", async ({
   page,
 }) => {
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
@@ -661,40 +813,41 @@ test("keeps showing the same interval readout once a card enters Cooldown, disti
 
   await expect(item).toHaveClass(/cooldown/);
   // Both readouts are visible at once and say different things: the
-  // countdown's "of 8h remaining" total (unchanged, MED-8/MED-29) alongside
-  // this story's separate always-visible "Every 8h" readout.
-  await expect(page.getByText("8h of 8h remaining")).toBeVisible();
-  await expect(item.locator(".medication-interval")).toHaveText("Every 8h");
+  // top-left countdown text ("8h left", MED-33) alongside this story's
+  // separate always-visible interval stat ("8" / "hours").
+  await expect(page.getByText("8h left")).toBeVisible();
+  await expect(item.locator(".medication-interval-value")).toHaveText("8");
 });
 
-test("the interval readout reflects a fractional interval using the same hours/minutes formatting as the countdown", async ({
+test("the interval stat's numeral reflects a fractional interval as the raw intervalHours value", async ({
   page,
 }) => {
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "4.5" });
 
   const item = page.locator(".medication-item");
-  await expect(item.locator(".medication-interval")).toHaveText("Every 4h 30m");
+  await expect(item.locator(".medication-interval-value")).toHaveText("4.5");
+  await expect(item.locator(".medication-interval-caption")).toHaveText("hours");
 });
 
-test("the interval readout updates immediately after an Edit-dialog interval change, in both Active and Cooldown states", async ({
+test("the interval stat updates immediately after an Edit-dialog interval change, in both Active and Cooldown states", async ({
   page,
 }) => {
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
   const item = page.locator(".medication-item");
 
-  // Active: edit the interval and confirm the readout updates without a
+  // Active: edit the interval and confirm the stat updates without a
   // reload.
   await page.getByRole("button", { name: "Edit Aspirin" }).click();
   let editDialog = page.getByRole("dialog", { name: "Edit medication" });
   await editDialog.getByLabel("Interval (hours)").fill("6");
   await clickAndAwaitEditDialogClose(page, "Save changes");
 
-  await expect(item.locator(".medication-interval")).toHaveText("Every 6h");
+  await expect(item.locator(".medication-interval-value")).toHaveText("6");
 
   // Cooldown: editing the interval mid-cooldown must not disturb the
   // running countdown/fill (MED-5 invariant, unchanged) but the always-
-  // visible readout still reflects the newly-edited live intervalHours.
+  // visible stat still reflects the newly-edited live intervalHours.
   await cardTapTarget(page, "Aspirin").click();
   await expect(item).toHaveClass(/cooldown/);
 
@@ -704,22 +857,26 @@ test("the interval readout updates immediately after an Edit-dialog interval cha
   await clickAndAwaitEditDialogClose(page, "Save changes");
 
   await expect(item).toHaveClass(/cooldown/);
-  await expect(page.getByText("6h of 6h remaining")).toBeVisible();
-  await expect(item.locator(".medication-interval")).toHaveText("Every 3h");
+  await expect(page.getByText("6h left")).toBeVisible();
+  await expect(item.locator(".medication-interval-value")).toHaveText("3");
 });
 
-test("each medication's interval readout is independent of every other medication's", async ({
+test("each medication's interval stat is independent of every other medication's", async ({
   page,
 }) => {
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
   await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
 
   await expect(
-    page.locator(".medication-item", { hasText: "Aspirin" }).locator(".medication-interval")
-  ).toHaveText("Every 8h");
+    page
+      .locator(".medication-item", { hasText: "Aspirin" })
+      .locator(".medication-interval-value")
+  ).toHaveText("8");
   await expect(
-    page.locator(".medication-item", { hasText: "Ibuprofen" }).locator(".medication-interval")
-  ).toHaveText("Every 6h");
+    page
+      .locator(".medication-item", { hasText: "Ibuprofen" })
+      .locator(".medication-interval-value")
+  ).toHaveText("6");
 });
 
 // --- MED-10: cooldown/active state stays correct across reload/reopen -----
@@ -745,7 +902,7 @@ test("mid-cooldown reload recomputes remaining time from the stored timestamp in
     parseFloat(getComputedStyle(el).getPropertyValue("--progress"))
   );
   expect(progressPercent).toBeCloseTo(75, 1);
-  await expect(page.getByText("6h of 8h remaining")).toBeVisible();
+  await expect(page.getByText("6h left")).toBeVisible();
 });
 
 test("a medication whose cooldown fully elapsed while the tab was closed shows Active on the very first render after reopening, with no in-tab timer required (MED-10 AC2)", async ({
@@ -789,7 +946,7 @@ test("tapping a running Cooldown card cancels it immediately and reverts to Acti
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
   await cardTapTarget(page, "Aspirin").click();
   await advanceAndFreeze(page, 2 * 60 * 60 * 1000);
-  await expect(page.getByText("6h of 8h remaining")).toBeVisible();
+  await expect(page.getByText("6h left")).toBeVisible();
 
   const tapTarget = cardTapTarget(page, "Aspirin");
   await tapTarget.click();
@@ -885,7 +1042,7 @@ test("editing the interval mid-cooldown (via the Edit dialog) does not un-cancel
 
   const item = page.locator(".medication-item");
   await expect(item).toHaveClass(/cooldown/);
-  await expect(page.getByText("6h of 8h remaining")).toBeVisible();
+  await expect(page.getByText("6h left")).toBeVisible();
 
   await cardTapTarget(page, "Aspirin").click(); // cancel
 
@@ -933,7 +1090,7 @@ test("Reset from Active starts a brand-new full-length cooldown right now", asyn
 
   const item = page.locator(".medication-item");
   await expect(item).toHaveClass(/cooldown/);
-  await expect(page.getByText("8h of 8h remaining")).toBeVisible();
+  await expect(page.getByText("8h left")).toBeVisible();
 });
 
 test("Reset from a running Cooldown overwrites it with a brand-new full-length cooldown", async ({
@@ -947,7 +1104,7 @@ test("Reset from a running Cooldown overwrites it with a brand-new full-length c
 
   await page.getByRole("button", { name: "Reset Aspirin cooldown" }).click();
 
-  await expect(page.getByText("8h of 8h remaining")).toBeVisible();
+  await expect(page.getByText("8h left")).toBeVisible();
   const item = page.locator(".medication-item");
   await expect(item).toHaveClass(/cooldown/);
 });
@@ -1060,7 +1217,7 @@ test("a valid Edit submit updates Name/Dose/Interval in the list, persists to lo
   await page.getByRole("button", { name: "Save changes" }).click();
 
   await expect(editDialog).not.toBeVisible();
-  await expect(page.getByText("Buffered Aspirin — 150mg")).toBeVisible();
+  await expectMedicationVisible(page, "Buffered Aspirin", "150mg");
 
   const stored = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("medications"))
@@ -1084,7 +1241,7 @@ test("clearing Name or Dose on submit shows an inline error, keeps the modal ope
 
   await expect(editDialog).toBeVisible();
   await expect(page.getByRole("alert")).toHaveText("Name is required.");
-  await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
+  await expectMedicationVisible(page, "Aspirin", "100mg");
 
   const stored = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("medications"))
@@ -1127,7 +1284,7 @@ test("closing via Cancel discards unsaved input (including Interval) and returns
   await page.getByRole("button", { name: "Cancel" }).click();
 
   await expect(editDialog).not.toBeVisible();
-  await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
+  await expectMedicationVisible(page, "Aspirin", "100mg");
   await expect(editButton).toBeFocused();
 
   const stored = await page.evaluate(() =>
@@ -1149,7 +1306,7 @@ test("closing via the close control discards unsaved input and returns focus to 
   await editDialog.getByRole("button", { name: "Close" }).click();
 
   await expect(editDialog).not.toBeVisible();
-  await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
+  await expectMedicationVisible(page, "Aspirin", "100mg");
   await expect(editButton).toBeFocused();
 });
 
@@ -1166,7 +1323,7 @@ test("closing via Escape discards unsaved input and returns focus to that row's 
   await page.keyboard.press("Escape");
 
   await expect(editDialog).not.toBeVisible();
-  await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
+  await expectMedicationVisible(page, "Aspirin", "100mg");
   await expect(editButton).toBeFocused();
 });
 
@@ -1184,7 +1341,7 @@ test("closing via a backdrop click discards unsaved input and returns focus to t
   await page.mouse.click(box.x + 2, box.y + 2);
 
   await expect(editDialog).not.toBeVisible();
-  await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
+  await expectMedicationVisible(page, "Aspirin", "100mg");
   await expect(editButton).toBeFocused();
 });
 
@@ -1239,7 +1396,7 @@ test("editing Name/Dose/Interval mid-cooldown leaves lastTakenAt and cooldownInt
   await advanceAndFreeze(page, 3 * 60 * 60 * 1000);
 
   const item = page.locator(".medication-item");
-  await expect(page.getByText("5h of 8h remaining")).toBeVisible();
+  await expect(page.getByText("5h left")).toBeVisible();
 
   const storedBefore = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("medications"))
@@ -1253,7 +1410,7 @@ test("editing Name/Dose/Interval mid-cooldown leaves lastTakenAt and cooldownInt
   await page.getByRole("button", { name: "Save changes" }).click();
 
   await expect(item).toHaveClass(/cooldown/);
-  await expect(page.getByText("5h of 8h remaining")).toBeVisible();
+  await expect(page.getByText("5h left")).toBeVisible();
 
   const storedAfter = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("medications"))
@@ -1300,7 +1457,7 @@ test("an edited Name/Dose/Interval persists across a reload (MED-17/MED-32)", as
 
   await page.reload();
 
-  await expect(page.getByText("Buffered Aspirin — 150mg")).toBeVisible();
+  await expectMedicationVisible(page, "Buffered Aspirin", "150mg");
   await page.getByRole("button", { name: "Edit Buffered Aspirin" }).click();
   await expect(
     page.getByRole("dialog", { name: "Edit medication" }).getByLabel("Interval (hours)")
@@ -1320,7 +1477,7 @@ test("editing one medication's Name/Dose/Interval does not affect another medica
   await editDialog.getByLabel("Interval (hours)").fill("3");
   await page.getByRole("button", { name: "Save changes" }).click();
 
-  await expect(page.getByText("Ibuprofen — 200mg")).toBeVisible();
+  await expectMedicationVisible(page, "Ibuprofen", "200mg");
   await expect(cardTapTarget(page, "Ibuprofen")).toHaveAccessibleName("Cancel Ibuprofen cooldown");
 
   const stored = await page.evaluate(() =>
@@ -1352,7 +1509,7 @@ test("shows an inline error and does not close the modal when the localStorage w
   await expect(page.getByRole("alert")).toHaveText(
     "Could not save changes — please try again."
   );
-  await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
+  await expectMedicationVisible(page, "Aspirin", "100mg");
 });
 
 // MED-34: the Edit dialog's "Revert to Active" control (MED-32) is removed
@@ -1509,7 +1666,7 @@ test("a status change on one card does not jitter its row-sharing sibling's heig
   expect(longNameBoxBefore.height).toBeGreaterThan(aspirinBoxBefore.height);
 
   await cardTapTarget(page, "Aspirin").click();
-  await expect(page.getByText("8h of 8h remaining")).toBeVisible();
+  await expect(page.getByText("8h left")).toBeVisible();
 
   const aspirinBoxAfter = await aspirinItem.boundingBox();
   const longNameBoxAfter = await longNameItem.boundingBox();
@@ -1738,12 +1895,12 @@ test("activating Delete removes the medication immediately, with no confirmation
   page,
 }) => {
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
-  await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
+  await expectMedicationVisible(page, "Aspirin", "100mg");
 
   await page.getByRole("button", { name: "Delete Aspirin" }).click();
 
   await expect(page.locator("dialog[open]")).toHaveCount(0);
-  await expect(page.getByText("Aspirin — 100mg")).toBeHidden();
+  await expectMedicationHidden(page, "Aspirin");
 });
 
 test("a deleted medication is removed from localStorage and does not reappear on reload (MED-12 AC5)", async ({
@@ -1762,8 +1919,8 @@ test("a deleted medication is removed from localStorage and does not reappear on
 
   await page.reload();
 
-  await expect(page.getByText("Aspirin — 100mg")).toBeHidden();
-  await expect(page.getByText("Ibuprofen — 200mg")).toBeVisible();
+  await expectMedicationHidden(page, "Aspirin");
+  await expectMedicationVisible(page, "Ibuprofen", "200mg");
 });
 
 test("shows an inline error and leaves the row in place when the localStorage write fails on Delete (MED-12 review)", async ({
@@ -1782,7 +1939,7 @@ test("shows an inline error and leaves the row in place when the localStorage wr
   await expect(page.getByRole("alert").last()).toHaveText(
     "Could not delete — please try again."
   );
-  await expect(page.getByText("Aspirin — 100mg")).toBeVisible();
+  await expectMedicationVisible(page, "Aspirin", "100mg");
   await expect(page.getByRole("button", { name: "Delete Aspirin" })).toBeVisible();
 });
 
@@ -1795,7 +1952,7 @@ test("deleting a medication that is currently in Cooldown discards its countdown
 
   await page.getByRole("button", { name: "Delete Aspirin" }).click();
 
-  await expect(page.getByText("Aspirin — 100mg")).toBeHidden();
+  await expectMedicationHidden(page, "Aspirin");
   await expect(
     page.getByText("No medications yet — add one to get started.")
   ).toBeVisible();
@@ -1820,9 +1977,9 @@ test("deleting one medication leaves every other medication's data and displayed
 
   await page.getByRole("button", { name: "Delete Aspirin" }).click();
 
-  await expect(page.getByText("Aspirin — 100mg")).toBeHidden();
-  await expect(page.getByText("Ibuprofen — 200mg")).toBeVisible();
-  await expect(page.getByText("Paracetamol — 500mg")).toBeVisible();
+  await expectMedicationHidden(page, "Aspirin");
+  await expectMedicationVisible(page, "Ibuprofen", "200mg");
+  await expectMedicationVisible(page, "Paracetamol", "500mg");
   await expect(cardTapTarget(page, "Ibuprofen")).toHaveAccessibleName("Log Ibuprofen dose now");
   await expect(page.locator(".medication-item", { hasText: "Paracetamol" })).toHaveClass(
     /cooldown/
@@ -1854,7 +2011,7 @@ test("deleting the last remaining medication returns the app to the MED-6 empty 
   await expect(fab).toBeVisible();
 
   await addMedicationViaUi(page, { name: "Ibuprofen", dose: "200mg", interval: "6" });
-  await expect(page.getByText("Ibuprofen — 200mg")).toBeVisible();
+  await expectMedicationVisible(page, "Ibuprofen", "200mg");
 });
 
 test("the Delete control can be activated by keyboard alone, via both Enter and Space (MED-12 AC9)", async ({
@@ -1868,15 +2025,15 @@ test("the Delete control can be activated by keyboard alone, via both Enter and 
   await expect(deleteAspirin).toBeFocused();
   await page.keyboard.press("Enter");
 
-  await expect(page.getByText("Aspirin — 100mg")).toBeHidden();
-  await expect(page.getByText("Ibuprofen — 200mg")).toBeVisible();
+  await expectMedicationHidden(page, "Aspirin");
+  await expectMedicationVisible(page, "Ibuprofen", "200mg");
 
   const deleteIbuprofen = page.getByRole("button", { name: "Delete Ibuprofen" });
   await deleteIbuprofen.focus();
   await expect(deleteIbuprofen).toBeFocused();
   await page.keyboard.press(" ");
 
-  await expect(page.getByText("Ibuprofen — 200mg")).toBeHidden();
+  await expectMedicationHidden(page, "Ibuprofen");
   await expect(
     page.getByText("No medications yet — add one to get started.")
   ).toBeVisible();
@@ -1894,7 +2051,7 @@ test("keyboard focus moves to the next row's Delete button after deleting a midd
   await expect(deleteIbuprofen).toBeFocused();
   await deleteIbuprofen.click();
 
-  await expect(page.getByText("Ibuprofen — 200mg")).toBeHidden();
+  await expectMedicationHidden(page, "Ibuprofen");
   await expect(page.getByRole("button", { name: "Delete Paracetamol" })).toBeFocused();
 });
 
@@ -1909,7 +2066,7 @@ test("keyboard focus moves to the previous row's Delete button after deleting th
   await expect(deleteIbuprofen).toBeFocused();
   await deleteIbuprofen.click();
 
-  await expect(page.getByText("Ibuprofen — 200mg")).toBeHidden();
+  await expectMedicationHidden(page, "Ibuprofen");
   await expect(page.getByRole("button", { name: "Delete Aspirin" })).toBeFocused();
 });
 
@@ -1925,6 +2082,6 @@ test("keyboard focus moves to the Add-medication trigger after deleting the last
   await expect(deleteButton).toBeFocused();
   await deleteButton.click();
 
-  await expect(page.getByText("Aspirin — 100mg")).toBeHidden();
+  await expectMedicationHidden(page, "Aspirin");
   await expect(addTrigger).toBeFocused();
 });
