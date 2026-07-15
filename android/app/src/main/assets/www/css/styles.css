@@ -1,0 +1,578 @@
+@property --progress {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 100%;
+}
+
+:root {
+  color-scheme: light;
+
+  /* Color system — see MedicationTracker Design Note (MED-13). */
+  --paper: #EAEEEE;
+  --panel: #DEE4E3;
+  --ink: #17222A;
+  --ink-soft: #4C5A62;
+  --rule: #C1CBCA;
+  --go: #2E6E52;
+  --go-soft: #DBEAE1;
+  --go-line: #A9CCBB;
+  --wait: #A6631F;
+  --wait-soft: #F0E1CC;
+  --wait-line: #DCB77E;
+  --danger: #B3261E;
+
+  --font-serif: Charter, "Iowan Old Style", "Palatino Linotype", Georgia, "Noto Serif", serif;
+  --font-sans: ui-sans-serif, "Helvetica Neue", Arial, sans-serif;
+
+  --gap: 1rem;
+  font-family: var(--font-serif);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* MED-23 AC5 (bugfix, see below): the bottom padding reserves room below
+   *all* page content — not just the medication list — so the fixed FAB
+   (bottom-right, a 1.5rem margin + 3.5rem size = 5rem footprint from the
+   viewport's bottom edge — see .add-medication-fab) never sits on top of
+   whatever renders last on the page once scrolled to the end. Originally
+   this clearance lived on `main`'s padding-bottom, but `<footer>` renders
+   after `</main>`, so that gap sat between the card list and the footer
+   instead of below the footer — the FAB still overlapped the footer's
+   disclaimer text at the true bottom of the page. Applying it to `body`
+   instead guarantees the clearance sits after the last element on the
+   page, whatever that ends up being. 6rem clears the FAB's 5rem footprint
+   with a 1rem buffer to spare (up from the original 3rem general-purpose
+   bottom padding, which this replaces). */
+body {
+  margin: 0;
+  padding: 0 1rem 6rem;
+  max-width: 40rem;
+  margin-inline: auto;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+/* MED-22: the container cap grows in step with `.medication-list`'s column
+   count below, so the grid has room without any card shrinking below the
+   ~16rem floor. Math (box-sizing: border-box, so max-width already
+   includes body's 2rem horizontal padding + section's 2rem horizontal
+   padding + section's ~0.125rem border — call it ~4.1rem of fixed
+   overhead outside the grid itself):
+     640px:  2 cols + 1 gap (0.9rem) in 48rem  -> ~21.5rem/col
+     1000px: 3 cols + 2 gaps (1.8rem) in 64rem -> ~19.4rem/col
+   Both breakpoints match `.medication-list`'s below 1:1 — below 640px
+   `max-width` is unchanged from its original 40rem, so narrow/mobile
+   viewports render pixel-identical to the pre-MED-22 single column (AC1).
+   Still capped at 64rem so content doesn't stretch edge-to-edge on
+   ultra-wide monitors (AC6). */
+@media (min-width: 640px) {
+  body {
+    max-width: 48rem;
+  }
+}
+
+@media (min-width: 1000px) {
+  body {
+    max-width: 64rem;
+  }
+}
+
+h1,
+h2,
+label,
+button {
+  font-family: var(--font-sans);
+  font-weight: 700;
+}
+
+h1 {
+  margin-block-end: 0.25rem;
+  color: var(--ink);
+}
+
+section {
+  margin-block: 1.5rem;
+  padding: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 0.75rem;
+}
+
+#medication-list-heading {
+  color: var(--ink);
+}
+
+#empty-state {
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-block-end: 0.75rem;
+}
+
+label {
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+input {
+  padding: 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.4rem;
+  font-size: 1rem;
+  font-family: var(--font-serif);
+  background: #fff;
+  color: var(--ink);
+}
+
+input:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible {
+  outline: 3px solid var(--go);
+  outline-offset: 2px;
+}
+
+button {
+  padding: 0.55em 1.1em;
+  border: none;
+  border-radius: 7px;
+  background: var(--go);
+  color: #fff;
+  font-size: 1rem;
+  font-family: var(--font-sans);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #255a43;
+}
+
+.form-error {
+  color: var(--danger);
+  min-height: 1.25rem;
+  margin: 0 0 0.5rem;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+}
+
+.form-error:empty {
+  display: none;
+}
+
+/* MED-23: floating action button, replacing the old top-center
+   .add-medication-bar/.add-medication-trigger. `position: fixed` pins it to
+   the viewport's bottom-right corner regardless of scroll position or the
+   MED-22 grid's column count (AC5, AC10) — its margin from the edges (1.5rem)
+   and size (3.5rem = 56px) are viewport-independent, no media queries here.
+   56px is deliberately above the app's ~44px baseline touch target
+   (MED-19) since this is the app's single primary action (AC4). No custom
+   hover/focus-visible rule is needed: the generic `button:hover` and
+   `button:focus-visible` rules already apply (it's a plain <button>). */
+.add-medication-fab {
+  position: fixed;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--go);
+  color: #fff;
+  font-size: 2rem;
+  line-height: 1;
+  box-shadow: 0 8px 24px -8px rgba(23, 34, 42, 0.4);
+  z-index: 10;
+}
+
+/* Shared by every app dialog (Add — MED-5, Edit — MED-17): each is its own
+   separate <dialog> element, but they look and behave consistently. */
+.app-dialog {
+  width: min(28rem, calc(100vw - 2rem));
+  border: none;
+  border-radius: 14px;
+  padding: 1.25rem;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 24px 60px -16px rgba(23, 34, 42, 0.4);
+}
+
+.app-dialog::backdrop {
+  background: rgba(23, 34, 42, 0.45);
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-block-end: 1rem;
+}
+
+.dialog-header h2 {
+  margin: 0;
+  color: var(--ink);
+}
+
+/* "×" control styling per the design note: small circular hover target,
+   soft ink color at rest, danger color on hover.
+   MED-19: width/height (not padding) drive the ~44px tap target, mirroring
+   the FAB's own sizing approach above — an explicit box with a flex-centered
+   glyph keeps the "×" itself the same visual size while growing only the
+   clickable area around it. */
+.close-dialog-btn {
+  background: transparent;
+  color: var(--ink-soft);
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  line-height: 1;
+  border-radius: 999px;
+}
+
+.close-dialog-btn:hover {
+  background: var(--panel);
+  color: var(--danger);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.dialog-actions button[type="button"] {
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid var(--rule);
+}
+
+.dialog-actions button[type="button"]:hover {
+  background: var(--panel);
+  color: var(--ink);
+}
+
+/* MED-22: CSS Grid, not flex — a single 1fr column below 640px renders
+   pixel-identical to the old flex-column layout (both stretch each
+   `<li>` to the container's full width with the same gap), so this is a
+   safe swap. Explicit `repeat(N, 1fr)` per breakpoint (rather than
+   `repeat(auto-fill, minmax(...))`) is deliberate: a grid item only ever
+   occupies the single cell it's auto-placed into, so a list shorter than
+   the column count fills the leftmost cells and leaves the remaining
+   *tracks* empty rather than stretching an existing card across them
+   (AC4) — that holds for `1fr` tracks the same as it would for
+   `auto-fill`, but explicit counts here read more clearly against the
+   breakpoints' fixed 2-col/3-col intent. Grid's default row-major
+   auto-placement (no `grid-auto-flow: column`, no `order` anywhere in
+   this file) keeps visual reading order identical to DOM order, so
+   tab/reading order never diverges from the visual grid (AC10).
+   `align-items: start` overrides Grid's default row-stretch behavior: a
+   row's items would otherwise all be forced to match the row's tallest
+   member (e.g. if a sibling card's name wraps to two lines), which would
+   grow a *shorter* card's own box beyond its natural MED-18 height purely
+   because of what's next to it — exactly the "grid must not stretch...
+   individual card content" a Cooldown card's countdown position depends
+   on (AC7). Each card keeps its own intrinsic (fixed, per MED-18) height
+   regardless of its row siblings. */
+.medication-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: start;
+  gap: 0.9rem;
+}
+
+@media (min-width: 640px) {
+  .medication-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1000px) {
+  .medication-list {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.medication-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  /* MED-33: the countdown text and the icon row now share one top strip
+     inside `.card-tap-target` (see `.cooldown-countdown` and
+     `.header-actions` below) instead of occupying two separate corners —
+     the old bottom-right countdown padding is gone entirely, and the old
+     top padding (previously sized to clear `.header-actions` above a title
+     line with nothing else up there) shrinks to just `.header-actions`' own
+     `top` offset, since the countdown row inside the flow now reserves the
+     icon row's actual height itself. Top and bottom are intentionally not
+     identical: top matches `.header-actions`' `top: 0.9rem` exactly so the
+     absolutely-positioned icon row and the in-flow countdown row underneath
+     it start at the same vertical position (see `.cooldown-countdown`'s own
+     comment for the height math that keeps them aligned). */
+  padding: 0.9rem 1.2rem 1rem;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: #fff;
+  position: relative;
+  transition: background 0.2s ease, border-color 0.2s ease, --progress 0.2s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .medication-item {
+    transition: none;
+  }
+}
+
+.medication-item.active {
+  border-color: var(--go-line);
+  background: linear-gradient(to bottom, var(--go-soft), #fff 140px);
+}
+
+.medication-item.cooldown {
+  --progress: 100%;
+  border-color: var(--wait-line);
+  background: linear-gradient(
+    to right,
+    var(--wait-soft) var(--progress, 100%),
+    #fff var(--progress, 100%)
+  );
+}
+
+/* MED-32: the whole-card tap-to-toggle region (log / cancel). A
+   pointer cursor signals it's clickable even though it isn't a native
+   <button>; its own `:focus-visible` ring comes from the shared
+   `[role="button"]:focus-visible` rule above.
+   `align-self: stretch` is load-bearing, not decorative: `.medication-item`
+   sets `align-items: flex-start` (so it can size its own flex children to
+   their content rather than stretching everything), which without this
+   override also shrinks `.card-tap-target` down to the width of its widest
+   line of text — leaving most of the visible card (anything right of the
+   countdown/name/dose text) unresponsive to a tap despite this being
+   documented as the "whole-card" target. Confirmed via `elementFromPoint`
+   at the card's right edge before this fix: it resolved to the `<li>`
+   itself, not `.card-tap-target`. */
+.card-tap-target {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  align-self: stretch;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+/* MED-33: the name/dose + interval-stat row, below the top strip
+   (countdown text + icon row — see `.cooldown-countdown`/`.header-actions`)
+   inside `.card-tap-target`. Replaces the old `.medication-header`, which
+   held the title and MED-34's plain-text interval label side by side; the
+   interval readout is now the numeral+caption stat below, not inline text,
+   so this row's job is just the two-column split (name/dose vs. stat). */
+.medication-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 1.05rem;
+  width: 100%;
+}
+
+/* Name above dose, stacked, per the MED-33 reference screenshot — replaces
+   the old single-line "Name — Dose" text (MED-33 AC10: this story's
+   reference screenshot is the source of truth for this detail, not the
+   AC text alone). `min-width: 0` lets a long name wrap/ellipsize within its
+   own column instead of forcing the row to overflow or shrinking
+   `.medication-interval-stat` below its content width. */
+.medication-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+/* MED-33: the compact "how often" stat replacing MED-34's plain-text
+   `.medication-interval` label ("Every 8h") — a large numeral plus a small
+   uppercase caption, always visible in both Active and Cooldown (unlike the
+   Cooldown-only countdown text above), per the reference screenshot. */
+.medication-interval-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  line-height: 1.15;
+}
+
+.medication-interval-value {
+  font-family: var(--font-sans);
+  font-size: 1.7rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.medication-interval-caption {
+  font-family: var(--font-sans);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* Small icon-button convention for per-card secondary actions in the header
+   (Edit, MED-17; Delete, MED-12). Deliberately neutral at rest, like the
+   dialog's own close control, with each action layering its own hover color
+   on top of this shared base rather than each inventing a parallel
+   convention (edit isn't destructive, so it hovers to `--go`; delete is, so
+   it hovers to `--danger`).
+   MED-19: sized here on the shared base rather than per-modifier — both
+   `.icon-btn.edit` and `.icon-btn.delete` combine with this class in app.js
+   (never used standalone), so one 44px box covers both controls. Same
+   width/height + flex-center approach as `.close-dialog-btn` and the FAB. */
+.icon-btn {
+  background: transparent;
+  color: var(--ink-soft);
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.icon-btn:hover {
+  background: var(--panel);
+}
+
+.icon-btn.edit:hover {
+  color: var(--go);
+}
+
+.icon-btn.delete:hover {
+  color: var(--danger);
+}
+
+/* MED-32: Reset hovers to the same amber used for the Cooldown state's
+   border/tint and countdown text (`--wait`) — it's the control that starts
+   a fresh cooldown, so it shares that state's color rather than Edit's
+   neutral-to-go or Delete's neutral-to-danger treatment. */
+.icon-btn.reset:hover {
+  color: var(--wait);
+}
+
+/* Groups the per-card Edit/Delete/Reset icon-buttons. MED-32: absolutely
+   positioned in the card's top-right corner rather than sharing a flex row
+   with the title — these are DOM siblings of `.card-tap-target`, not its
+   descendants (see that tap-target's own comment in app.js for why), so
+   they can't share a flex parent with the title group.
+   MED-33: now overlays the top-left `.cooldown-countdown` row inside
+   `.card-tap-target` — both occupy the same visual strip, `.header-actions`
+   painting on top since it comes later in DOM order (no `z-index` needed).
+   `.cooldown-countdown`'s `min-height` (see below) matches this element's
+   44px (MED-19) button height so the two never overlap the name/dose/stat
+   row that follows. */
+.header-actions {
+  position: absolute;
+  top: 0.9rem;
+  right: 1.2rem;
+  display: flex;
+  align-items: center;
+  /* MED-19: bumped from 0.15rem to 0.5rem (8px) now that Edit/Delete are
+     44px touch targets — the old fixed gap left ~2.4px of dead zone between
+     two adjacent buttons, one of which (Delete) is irreversible with no
+     confirmation step. A wider gap directly serves this ticket's own
+     mis-tap-reduction intent. */
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.medication-name {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.medication-dose {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  color: var(--ink-soft);
+}
+
+/* Live countdown text on a cooldown card, e.g. "3h 12m 45s left" —
+   supplementary to the card's `--progress` fill, never a substitute for it.
+   MED-33: relocated from the card's bottom-right corner (MED-18's original
+   position) to the top-left of the top strip it now shares with
+   `.header-actions`, per direct user follow-up ("so the card doesn't change
+   size when clicked").
+   Unlike the old bottom-right version — out of flow via
+   `position: absolute`, with `.medication-item`'s own padding reserving its
+   space — this element is a normal in-flow child of `.card-tap-target` now,
+   so it has to reserve its own space directly. `min-height` matches
+   `.icon-btn`'s 44px touch target (MED-19) so `.header-actions`, absolutely
+   positioned on top of this same row, never overlaps the name/dose/stat row
+   that follows, regardless of whether this text is one line, wrapped, or
+   empty.
+   MED-18's "always reserve, never conditionally grow/shrink" guarantee
+   still holds, just via the `.is-hidden` modifier below (`visibility`)
+   instead of the `hidden` attribute the old absolutely-positioned version
+   used — `hidden` maps to `display: none`, which would collapse *this*
+   element's height now that it's in normal flow (irrelevant for the old
+   version, already out of flow either way). `visibility: hidden` keeps the
+   box — and its reserved height — while removing the text from view and
+   the accessibility tree.
+   `padding-right` reserves room so the text can never visually run
+   underneath `.header-actions`: three 44px icon buttons + two 0.5rem gaps
+   is 9.25rem, rounded up for a small safety margin. */
+.cooldown-countdown {
+  display: flex;
+  align-items: center;
+  min-height: 2.75rem;
+  margin: 0;
+  padding-right: 9.5rem;
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--wait);
+  text-align: left;
+}
+
+.cooldown-countdown.is-hidden {
+  visibility: hidden;
+}
+
+.row-error {
+  margin: 0;
+}
+
+/* Visually hides content while keeping it in the accessibility tree, so
+   screen readers still announce it (e.g. the live status region). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

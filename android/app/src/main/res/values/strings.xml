@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Medication Tracker</string>
+    <string name="notification_channel_name">Medication reminders</string>
+    <string name="notification_channel_description">Alerts you when a medication\'s cooldown has ended and it\'s ready to take again.</string>
+    <string name="notification_title_ready">%1$s is ready</string>
+    <string name="notification_text_ready">The cooldown has ended — you can log the next dose.</string>
+</resources>

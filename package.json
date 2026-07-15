@@ -8,7 +8,8 @@
     "dev": "serve . -l 5500",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "sync:android": "node scripts/sync-android-assets.mjs"
   },
   "repository": {
     "type": "git",
