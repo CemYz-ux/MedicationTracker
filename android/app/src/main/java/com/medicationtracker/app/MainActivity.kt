@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,6 +43,12 @@ class MainActivity : AppCompatActivity() {
         val webView = findViewById<WebView>(R.id.webView)
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
+        // Best-effort offline reuse: prefer whatever's already cached and only hit the
+        // network if nothing's cached, rather than the default mode which typically fails
+        // outright on a fresh launch with no network. Not a guaranteed offline mode — still
+        // fails on a genuine first-ever launch with no network, and is subject to GitHub
+        // Pages' cache headers and Android's disk-cache eviction.
+        webView.settings.cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
         webView.webViewClient = RestrictedWebViewClient()
         webView.addJavascriptInterface(WebAppBridge(applicationContext), "AndroidBridge")
         webView.loadUrl(APP_URL)

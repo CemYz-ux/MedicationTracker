@@ -5,10 +5,14 @@ GitHub Pages deployment (`https://cemyz-ux.github.io/MedicationTracker/`) in a `
 so it can be installed as an `.apk` and get real background notifications when a
 medication's cooldown ends — something the pure web app can't do reliably (see below).
 
-**Requires network connectivity to open.** This is a deliberate product decision: one
-codebase, no asset-sync step, no offline fallback. The WebView always loads the live
-Pages URL (`MainActivity.APP_URL`) — there is no bundled/offline copy of the web app
-shipped in the APK.
+**Requires network connectivity to open, in general.** This is a deliberate product
+decision: one codebase, no asset-sync step, no bundled offline copy shipped in the APK.
+The WebView always loads the live Pages URL (`MainActivity.APP_URL`); the one exception is
+`WebSettings.LOAD_CACHE_ELSE_NETWORK` (set in `MainActivity.onCreate`), which makes the
+WebView prefer whatever response is already in its disk cache and only hit the network if
+nothing's cached. That's best-effort reuse of whatever was last loaded, not a real offline
+mode — it still fails on a genuine first-ever launch with no network, and is subject to
+GitHub Pages' own cache headers and Android's disk-cache eviction, so don't rely on it.
 
 ## Why this exists, and why it isn't just a WebView
 
@@ -61,11 +65,13 @@ asset-sync step is needed just to ship a web app change.
 - **Package** `com.medicationtracker.app`, **minSdk 26** (required for notification
   channels anyway), **targetSdk 34**. Easy to change later, not load-bearing.
 - **Live GitHub Pages URL, not bundled assets** — one codebase, no asset-sync step, no
-  offline fallback. This intentionally reintroduces a network dependency the pure web app
-  has never had (`../architecture/decisions/0001-static-site-no-backend.md` still holds for
-  the *backend* — this is just about where the static files are fetched from). If the device
-  has no connectivity when the app is opened, the WebView simply fails to load; there is no
-  offline copy to fall back to.
+  bundled offline copy. This intentionally reintroduces a network dependency the pure web
+  app has never had (`../architecture/decisions/0001-static-site-no-backend.md` still holds
+  for the *backend* — this is just about where the static files are fetched from). The
+  WebView's cache mode is set to `LOAD_CACHE_ELSE_NETWORK`, so a launch with no network can
+  still succeed if a prior load left something in the disk cache — but that's best-effort
+  reuse, not a guarantee. On a genuine first-ever launch with no network (or once the cache
+  is evicted), the WebView simply fails to load.
 - **Navigation is locked to our own origin** — `MainActivity.RestrictedWebViewClient`
   only lets the WebView navigate within `cemyz-ux.github.io/MedicationTracker/`; anything
   else opens in an external browser instead. This matters because `WebAppBridge` is
