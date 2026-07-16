@@ -630,6 +630,11 @@ editForm.addEventListener("submit", (event) => {
   }
 
   medications = updated;
+  // Renaming (or re-dosing) mid-cooldown must still update the native
+  // reminder: NotificationHelper bakes the medication's name into the
+  // PendingIntent at schedule time, so without this re-sync a reminder
+  // scheduled before the edit would fire showing the stale, pre-edit name.
+  syncReminders(medications);
   render();
   closeEditDialog();
 });
