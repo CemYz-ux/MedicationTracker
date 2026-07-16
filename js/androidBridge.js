@@ -1,4 +1,4 @@
-import { isInCooldown } from "./medications.js";
+import { isInCooldown, getCooldownTotalMs } from "./medications.js";
 
 /**
  * True only when this page is running inside the native Android WebView
@@ -18,11 +18,13 @@ export function isAndroidBridgeAvailable() {
  * cooldown, or cancels any pending reminder if it isn't. A complete no-op
  * when the bridge isn't available (see `isAndroidBridgeAvailable`).
  *
- * Deliberately reads `cooldownIntervalHours` — the snapshot `logDose` takes
- * when GO is pressed — not the live, editable `intervalHours`, mirroring
- * `isInCooldown`/`getCooldownTotalMs`'s own discipline (MED-5/MED-8/MED-32):
- * editing the interval mid-cooldown must never disturb an already-running
- * cooldown's timing, and that includes the native alarm scheduled for it.
+ * Uses `getCooldownTotalMs` — which mirrors `isInCooldown`'s own discipline
+ * (MED-5/MED-8/MED-32) of reading `cooldownIntervalHours` (the snapshot
+ * `logDose` takes when GO is pressed), falling back to `intervalHours` only
+ * for medications logged before that field existed — not the live, editable
+ * `intervalHours` directly. Editing the interval mid-cooldown must never
+ * disturb an already-running cooldown's timing, and that includes the
+ * native alarm scheduled for it.
  *
  * `now` (epoch millis) is injectable for deterministic tests; it defaults to
  * `Date.now()`.
@@ -33,8 +35,7 @@ export function syncReminders(medications, now = Date.now()) {
   for (const medication of medications) {
     if (isInCooldown(medication, now)) {
       const dueAtMillis =
-        new Date(medication.lastTakenAt).getTime() +
-        medication.cooldownIntervalHours * 60 * 60 * 1000;
+        new Date(medication.lastTakenAt).getTime() + getCooldownTotalMs(medication);
       window.AndroidBridge.scheduleReminder(medication.id, medication.name, dueAtMillis);
     } else {
       window.AndroidBridge.cancelReminder(medication.id);
