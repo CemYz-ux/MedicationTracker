@@ -1,9 +1,14 @@
 # MedicationTracker — Android wrapper
 
-A thin native Android app that wraps the existing static web app (`../index.html`,
-`../css/`, `../js/`) in a `WebView`, so it can be installed as an `.apk` and get real
-background notifications when a medication's cooldown ends — something the pure web app
-can't do reliably (see below).
+A thin native Android app that wraps the existing static web app, loaded live from its
+GitHub Pages deployment (`https://cemyz-ux.github.io/MedicationTracker/`) in a `WebView`,
+so it can be installed as an `.apk` and get real background notifications when a
+medication's cooldown ends — something the pure web app can't do reliably (see below).
+
+**Requires network connectivity to open.** This is a deliberate product decision: one
+codebase, no asset-sync step, no offline fallback. The WebView always loads the live
+Pages URL (`MainActivity.APP_URL`) — there is no bundled/offline copy of the web app
+shipped in the APK.
 
 ## Why this exists, and why it isn't just a WebView
 
@@ -43,26 +48,31 @@ first real build as an actual test, not a formality.
 3. Install on a device/emulator and grant the notification permission prompt on first
    launch (Android 13+).
 
-## Keeping the bundled web app in sync
+## Keeping the web app in sync
 
-`app/src/main/assets/www/` is a **snapshot copy**, not a live reference, of the repo root's
-`index.html`/`css/`/`js/`. After any change to the web app that should ship in the Android
-build, re-sync from the repo root:
-
-```
-npm run sync:android
-```
-
-Then rebuild the APK. Forgetting this step means the Android app silently keeps shipping
-stale web app code.
+There's nothing to keep in sync — the WebView loads `https://cemyz-ux.github.io/MedicationTracker/`
+directly, the same deployment everyone else uses. Ship a change by merging it to `main` and
+letting the existing GitHub Pages deploy pick it up as usual; the Android app picks up the
+new version the next time it's opened with connectivity. No separate Android build or
+asset-sync step is needed just to ship a web app change.
 
 ## Design choices worth knowing about
 
 - **Package** `com.medicationtracker.app`, **minSdk 26** (required for notification
   channels anyway), **targetSdk 34**. Easy to change later, not load-bearing.
-- **Bundled assets, not the live GitHub Pages URL** — matches the web app's existing
-  no-backend/offline/localStorage-only architecture (`../architecture/decisions/0001-static-site-no-backend.md`)
-  rather than reintroducing a network dependency the app has never had.
+- **Live GitHub Pages URL, not bundled assets** — one codebase, no asset-sync step, no
+  offline fallback. This intentionally reintroduces a network dependency the pure web app
+  has never had (`../architecture/decisions/0001-static-site-no-backend.md` still holds for
+  the *backend* — this is just about where the static files are fetched from). If the device
+  has no connectivity when the app is opened, the WebView simply fails to load; there is no
+  offline copy to fall back to.
+- **Navigation is locked to our own origin** — `MainActivity.RestrictedWebViewClient`
+  only lets the WebView navigate within `cemyz-ux.github.io/MedicationTracker/`; anything
+  else opens in an external browser instead. This matters because `WebAppBridge` is
+  registered via `addJavascriptInterface`, which exposes it to *any* page the WebView
+  loads — restricting navigation is what keeps the native bridge unreachable from
+  untrusted content now that the WebView loads live pages instead of a locked-down local
+  bundle.
 - **Exact-alarm permission is optional, not required** — `SCHEDULE_EXACT_ALARM`/
   `USE_EXACT_ALARM` are declared, but the code checks `canScheduleExactAlarms()` and falls
   back to inexact-but-Doze-aware scheduling if the user hasn't granted it (a notification a

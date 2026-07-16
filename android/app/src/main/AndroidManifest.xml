@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Required for the WebView to load the live GitHub Pages site (no bundled offline copy). -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- Reschedule reminders after a reboot, since AlarmManager alarms don't survive it. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Android 13+ requires runtime consent for posting notifications; requested in MainActivity. -->

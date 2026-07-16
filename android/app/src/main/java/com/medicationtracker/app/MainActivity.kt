@@ -1,9 +1,12 @@
 package com.medicationtracker.app
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.result.contract.ActivityResultContracts
@@ -11,11 +14,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 
 /**
- * Thin WebView shell around the existing static web app (bundled offline in
- * assets/www, copied from the repo root — see android/README.md for the sync step).
- * All medication CRUD/cooldown logic stays in the web app; this class only wires up
- * the WebView itself and the notification-permission prompt. Reminder scheduling is
- * handled by [WebAppBridge], which the web app calls via `window.AndroidBridge`.
+ * Thin WebView shell around the existing static web app, loaded live from its
+ * GitHub Pages deployment (see android/README.md — there is deliberately no bundled
+ * offline copy). All medication CRUD/cooldown logic stays in the web app; this class
+ * only wires up the WebView itself, the notification-permission prompt, and keeps
+ * navigation confined to our own origin (see [RestrictedWebViewClient]). Reminder
+ * scheduling is handled by [WebAppBridge], which the web app calls via
+ * `window.AndroidBridge`.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -37,9 +42,36 @@ class MainActivity : AppCompatActivity() {
         val webView = findViewById<WebView>(R.id.webView)
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
-        webView.webViewClient = WebViewClient()
+        webView.webViewClient = RestrictedWebViewClient()
         webView.addJavascriptInterface(WebAppBridge(applicationContext), "AndroidBridge")
-        webView.loadUrl("file:///android_asset/www/index.html")
+        webView.loadUrl(APP_URL)
+    }
+
+    /**
+     * Keeps the WebView confined to our own deployed web app. `addJavascriptInterface`
+     * exposes [WebAppBridge] to *any* page the WebView navigates to, not just the page
+     * it was first loaded with — so now that we load live content instead of a
+     * locked-down local bundle, every navigation needs an explicit check. Anything
+     * outside [ALLOWED_HOST]/[ALLOWED_PATH_PREFIX] (e.g. an outbound link, if one ever
+     * exists) is handed off to an external browser via an ACTION_VIEW intent instead of
+     * navigating the WebView itself there, so the native bridge is never reachable from
+     * an untrusted origin. This does not run for the initial `loadUrl` call above, only
+     * for subsequent navigations (link taps, redirects, etc.).
+     */
+    private class RestrictedWebViewClient : WebViewClient() {
+        override fun shouldOverrideUrlLoading(
+            view: WebView,
+            request: WebResourceRequest
+        ): Boolean {
+            val uri = request.url
+            val isOwnOrigin = uri.host == ALLOWED_HOST &&
+                (uri.path ?: "").startsWith(ALLOWED_PATH_PREFIX)
+            if (isOwnOrigin) {
+                return false
+            }
+            view.context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+            return true
+        }
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -52,5 +84,11 @@ class MainActivity : AppCompatActivity() {
                 requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+    }
+
+    private companion object {
+        const val ALLOWED_HOST = "cemyz-ux.github.io"
+        const val ALLOWED_PATH_PREFIX = "/MedicationTracker/"
+        const val APP_URL = "https://$ALLOWED_HOST$ALLOWED_PATH_PREFIX"
     }
 }
