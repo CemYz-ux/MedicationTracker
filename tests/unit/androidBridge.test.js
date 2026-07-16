@@ -61,16 +61,11 @@ describe("syncReminders — bridge unavailable", () => {
     expect(() => syncReminders(medications)).not.toThrow();
   });
 
-  it("never calls scheduleReminder/cancelReminder when window has no AndroidBridge", () => {
-    const scheduleReminder = vi.fn();
-    const cancelReminderMock = vi.fn();
+  it("is a complete no-op and never throws when window exists but has no AndroidBridge", () => {
     globalThis.window = { AndroidBridge: undefined };
     const medications = [createCooldownMedication(), createActiveMedication()];
 
-    syncReminders(medications);
-
-    expect(scheduleReminder).not.toHaveBeenCalled();
-    expect(cancelReminderMock).not.toHaveBeenCalled();
+    expect(() => syncReminders(medications)).not.toThrow();
   });
 });
 
@@ -147,6 +142,32 @@ describe("syncReminders — bridge available", () => {
       medication.name,
       dueAtMillisFromLiveInterval
     );
+  });
+
+  it("computes a finite, correct dueAtMillis for a legacy medication with no cooldownIntervalHours (falls back to intervalHours)", () => {
+    const { scheduleReminder, cancelReminderMock } = installMockBridge();
+    const lastTakenAtMs = Date.parse("2026-07-15T10:00:00.000Z");
+    // Logged before `cooldownIntervalHours` existed: only `intervalHours` is
+    // set, which is exactly what `cooldownIntervalHoursFor` falls back to.
+    // Regression test — this used to compute
+    // `undefined * 60 * 60 * 1000` (NaN), which Android's JS-bridge number
+    // coercion turned into `0`, firing the native alarm immediately for a
+    // still-in-cooldown medication.
+    const medication = createCooldownMedication({
+      lastTakenAt: new Date(lastTakenAtMs).toISOString(),
+      cooldownIntervalHours: undefined,
+      intervalHours: 8,
+    });
+    const now = lastTakenAtMs + 60 * 60 * 1000; // 1h into the 8h cooldown
+
+    syncReminders([medication], now);
+
+    const expectedDueAtMillis = lastTakenAtMs + 8 * 60 * 60 * 1000;
+    expect(scheduleReminder).toHaveBeenCalledTimes(1);
+    const [, , dueAtMillis] = scheduleReminder.mock.calls[0];
+    expect(Number.isFinite(dueAtMillis)).toBe(true);
+    expect(dueAtMillis).toBe(expectedDueAtMillis);
+    expect(cancelReminderMock).not.toHaveBeenCalled();
   });
 
   it("syncs every medication in the list independently", () => {
