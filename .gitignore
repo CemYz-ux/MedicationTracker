@@ -4,3 +4,15 @@ test-results/
 playwright-report/
 .DS_Store
 .claude/
+
+# Android (android/)
+android/.gradle/
+android/.idea/
+android/local.properties
+android/build/
+android/app/build/
+android/*/build/
+android/.cxx/
+android/captures/
+android/*.iml
+android/app/release/

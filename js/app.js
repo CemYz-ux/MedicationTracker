@@ -13,6 +13,7 @@ import {
   formatRemainingLabel,
   formatCurrentDate,
 } from "./medications.js";
+import { syncReminders, cancelReminder } from "./androidBridge.js";
 
 // How often the periodic re-check re-evaluates every medication's cooldown
 // state (countdown text, fill, card aria-label). Dropped from 30s to ~1s in
@@ -203,6 +204,7 @@ function handleCardTap(id, refs) {
   }
 
   medications = updated;
+  syncReminders(medications);
   refs.tapError.textContent = "";
   const justUpdated = medications.find((medication) => medication.id === id);
   // Refresh immediately rather than waiting for the next periodic tick, so
@@ -232,6 +234,7 @@ function handleReset(medication, refs) {
   }
 
   medications = updated;
+  syncReminders(medications);
   refs.resetError.textContent = "";
   const justReset = medications.find((entry) => entry.id === medication.id);
   updateCooldownDisplay(justReset, refs);
@@ -444,6 +447,10 @@ function handleDelete(medication) {
     return;
   }
   medications = remaining;
+  // A generic `syncReminders(medications)` re-sync never touches an id
+  // that's no longer present in the list, so the deleted medication's own
+  // native alarm would otherwise be orphaned — cancel it explicitly here.
+  cancelReminder(medication.id);
   render();
 
   // Focus goes to whichever row now occupies the deleted row's old spot
@@ -623,6 +630,11 @@ editForm.addEventListener("submit", (event) => {
   }
 
   medications = updated;
+  // Renaming (or re-dosing) mid-cooldown must still update the native
+  // reminder: NotificationHelper bakes the medication's name into the
+  // PendingIntent at schedule time, so without this re-sync a reminder
+  // scheduled before the edit would fire showing the stale, pre-edit name.
+  syncReminders(medications);
   render();
   closeEditDialog();
 });
@@ -632,3 +644,8 @@ editForm.addEventListener("submit", (event) => {
 dateHeading.textContent = formatCurrentDate();
 
 render();
+// Re-syncs any already-running cooldowns' native reminders on load — a
+// safety net on top of the native side's own reboot-persistence, so
+// relaunching the Android app after it was fully killed re-arms them.
+// A no-op outside the Android WebView wrapper (see `syncReminders`).
+syncReminders(medications);

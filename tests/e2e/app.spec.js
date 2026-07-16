@@ -1422,6 +1422,43 @@ test("editing Name/Dose/Interval mid-cooldown leaves lastTakenAt and cooldownInt
   expect(storedAfter[0].intervalHours).toBe(2);
 });
 
+// MED-37: NotificationHelper bakes the medication's name into the native
+// alarm's PendingIntent at schedule time, so an Edit-dialog rename mid-cooldown
+// must re-sync the native reminder — otherwise a reminder scheduled before the
+// edit would go on to fire showing the stale, pre-edit name. `window.AndroidBridge`
+// is stubbed via `addInitScript` (evaluated before any page script runs, same as
+// `js/androidBridge.js`'s own "is this the native wrapper" check would see it) so
+// this exercises the real `syncReminders` wiring in js/app.js, not a mock of it.
+test("renaming a medication mid-cooldown re-syncs the native reminder with the new name (MED-37)", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.__bridgeCalls = { scheduleReminder: [], cancelReminder: [] };
+    window.AndroidBridge = {
+      scheduleReminder: (id, name, dueAtMillis) => {
+        window.__bridgeCalls.scheduleReminder.push({ id, name, dueAtMillis });
+      },
+      cancelReminder: (id) => {
+        window.__bridgeCalls.cancelReminder.push(id);
+      },
+    };
+  });
+  await page.reload();
+
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await cardTapTarget(page, "Aspirin").click(); // logs a dose, entering Cooldown
+
+  await page.getByRole("button", { name: "Edit Aspirin" }).click();
+  const editDialog = page.getByRole("dialog", { name: "Edit medication" });
+  await editDialog.getByLabel("Name").fill("Aspirin XL");
+  await clickAndAwaitEditDialogClose(page, "Save changes");
+
+  const scheduleCalls = await page.evaluate(() => window.__bridgeCalls.scheduleReminder);
+  expect(scheduleCalls.length).toBeGreaterThan(0);
+  expect(scheduleCalls[scheduleCalls.length - 1].name).toBe("Aspirin XL");
+  expect(Number.isFinite(scheduleCalls[scheduleCalls.length - 1].dueAtMillis)).toBe(true);
+});
+
 test("editing Name/Dose/Interval while Active leaves it Active — editing does not start a cooldown (MED-17)", async ({
   page,
 }) => {
