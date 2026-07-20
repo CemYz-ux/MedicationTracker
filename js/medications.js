@@ -199,7 +199,28 @@ function cooldownIntervalHoursFor(medication) {
     : medication.intervalHours;
 }
 
-function cooldownReadyAt(medication) {
+/**
+ * The exact moment (epoch ms) `medication`'s current cooldown ends — its
+ * "wear off" instant: `lastTakenAt` plus `cooldownIntervalHoursFor`'s
+ * snapshotted interval. `isInCooldown` and `getCooldownRemainingMs` both
+ * compare `now` against this value; `formatLastTakenLabel` (MED-38) uses it
+ * as the zero-point for the Active-state "time since wear-off" reading,
+ * deliberately *not* `lastTakenAt` itself (the moment the dose was taken,
+ * which is a different instant — see that function's own doc comment for
+ * why the distinction matters).
+ *
+ * Only meaningful when `medication.lastTakenAt` is truthy and parseable —
+ * callers must guard that themselves (see `isInCooldown`'s and
+ * `formatLastTakenLabel`'s own checks). A falsy `lastTakenAt` does *not*
+ * make this come back `NaN`: `new Date(null).getTime()` is epoch 0, so a
+ * never-taken medication would otherwise produce a small, meaningless
+ * "ready at" timestamp in the far past — the null check has to happen
+ * before calling this, not be inferred from its return value.
+ *
+ * Exported for `formatLastTakenLabel`'s use (MED-38); every other caller in
+ * this module is internal.
+ */
+export function cooldownReadyAt(medication) {
   const takenAtMs = new Date(medication.lastTakenAt).getTime();
   return takenAtMs + cooldownIntervalHoursFor(medication) * 60 * 60 * 1000;
 }
@@ -440,6 +461,94 @@ export function formatRemainingLabel(medication, now = Date.now()) {
  */
 export function formatIntervalLabel(intervalHours) {
   return `Every ${formatDuration(intervalHours * 60 * 60 * 1000)}`;
+}
+
+/**
+ * Formats elapsed time since `momentMs` (epoch millis, or any value `new
+ * Date()` accepts) as a relative-time string — e.g. "Just now", "12m ago",
+ * "3h 5m ago", "1d 2h ago" — or the literal "Not yet taken" when `momentMs`
+ * is `null`/falsy or unparseable (corrupted storage), mirroring
+ * `isInCooldown`'s own guard for that case.
+ *
+ * A general "how long ago was this moment" formatter, not tied to any one
+ * meaning of "this moment" — MED-38's Active-state top-strip text
+ * (`formatLastTakenLabel`, below) is its only caller today, feeding in the
+ * medication's wear-off instant (`cooldownReadyAt`) rather than its
+ * `lastTakenAt` dose timestamp (see that function's own doc comment for why
+ * the distinction matters); nothing here assumes which one it's given.
+ *
+ * Deliberately a *separate* implementation from `formatDuration`, not a
+ * thin wrapper around it, despite the shared "Xh Ym", zero-component-
+ * omission phrasing style: `formatDuration` rounds its minutes/seconds *up*
+ * (`Math.ceil`) so a live countdown's remaining time never flashes a
+ * misleading "0m"/"0s" in its final moments. A "how long ago" readout has
+ * the opposite correctness requirement — rounding up would claim *more*
+ * time has elapsed than truly has (e.g. 61s ago reading "2m ago"). This
+ * function rounds down (`Math.floor`) instead, so "Xm ago" always means "at
+ * least X whole minutes have elapsed", the conventional meaning of a
+ * relative-time readout. Adds a day-level component (absent from
+ * `formatDuration`) since, unlike a cooldown countdown (bounded by a
+ * medication's interval, realistically well under a day), this can
+ * meaningfully be days ago.
+ *
+ * `now` (epoch millis) is injectable for deterministic tests; it defaults
+ * to `Date.now()`, the same discipline as every other `now`-taking function
+ * in this module.
+ */
+export function formatRelativeTime(momentMs, now = Date.now()) {
+  if (!momentMs) return "Not yet taken";
+  const takenAtMs = new Date(momentMs).getTime();
+  if (Number.isNaN(takenAtMs)) return "Not yet taken";
+
+  const elapsedMs = Math.max(0, now - takenAtMs);
+  if (elapsedMs < 60_000) return "Just now";
+
+  const totalMinutes = Math.floor(elapsedMs / 60_000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) {
+    return hours > 0 ? `${days}d ${hours}h ago` : `${days}d ago`;
+  }
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m ago` : `${hours}h ago`;
+  }
+  return `${minutes}m ago`;
+}
+
+/**
+ * The Active-state text for the shared top-strip slot (`.cooldown-countdown`
+ * in app.js/CSS) that Cooldown's own `formatRemainingLabel` occupies while a
+ * cooldown is running — both states now always populate this one slot
+ * (MED-38, corrected per Jira comment 10320), rather than a separate line
+ * under name/dose.
+ *
+ * "Not yet taken" for a medication that has never been logged
+ * (`medication.lastTakenAt` falsy), checked explicitly here rather than
+ * relying on `formatRelativeTime`'s own null handling: `cooldownReadyAt`
+ * does *not* produce `NaN`/`null` for a falsy `lastTakenAt` (see its own
+ * doc comment), so that check has to happen before calling it, not be
+ * inferred from its return value.
+ *
+ * Otherwise, a relative "time since wear-off" reading — e.g. "Just now",
+ * "12m ago" — measured from `cooldownReadyAt` (when the cooldown *ended*),
+ * not `lastTakenAt` (when the dose was taken). This is the core of the
+ * MED-38 scope correction: the first shipped version measured from the
+ * dose timestamp, so the instant a Cooldown naturally reactivated to Active
+ * (MED-9/10) it read the full interval length (e.g. "8h ago" for an 8h
+ * medication) instead of "Just now". Reusing `cooldownReadyAt` — already
+ * computed for `isInCooldown`/`getCooldownRemainingMs` — keeps this in sync
+ * with exactly the same wear-off moment those use, rather than re-deriving
+ * it.
+ *
+ * Only meaningful for a medication that isn't currently in cooldown — the
+ * caller (`js/app.js`'s `updateCooldownDisplay`) uses `formatRemainingLabel`
+ * for this same slot's text while a cooldown is running instead.
+ */
+export function formatLastTakenLabel(medication, now = Date.now()) {
+  if (!medication.lastTakenAt) return "Not yet taken";
+  return formatRelativeTime(cooldownReadyAt(medication), now);
 }
 
 /**

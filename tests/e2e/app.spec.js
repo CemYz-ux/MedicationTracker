@@ -188,7 +188,12 @@ test("shows a medication as Active on load when its cooldown had already elapsed
   await expect(item).toHaveClass(/active/);
   await expect(item).not.toHaveClass(/cooldown/);
   await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Log Aspirin dose now");
-  await expect(item.locator(".cooldown-countdown")).toBeHidden();
+  // MED-38 (corrected per Jira comment 10320): the shared top-strip slot is
+  // always populated now, even on initial render — here reading "2h ago"
+  // since the cooldown wore off (8h after the 10h-ago dose) 2h before load,
+  // not "8h ago" from the dose timestamp itself, the very distinction the
+  // scope correction exists to guarantee.
+  await expect(item.locator(".cooldown-countdown")).toHaveText("2h ago");
 });
 
 test("shows today's day and date in place of the old page title/subtitle/heading, with the old disclaimer text gone too", async ({
@@ -585,7 +590,7 @@ test("shows a live countdown in '{remaining} left' format after tapping, and the
   await expect(item).toHaveCSS("--progress", "100%");
 });
 
-test("tapping to log does not change the card's height, even though it reveals countdown text (MED-18)", async ({
+test("a Cooldown card's own height stays fixed across repeated tap cycles (MED-18)", async ({
   page,
 }) => {
   await page.clock.install();
@@ -593,23 +598,31 @@ test("tapping to log does not change the card's height, even though it reveals c
 
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
-  const item = page.locator(".medication-item");
-  const heightBeforeTap = (await item.boundingBox()).height;
-
   await cardTapTarget(page, "Aspirin").click();
   await expect(page.getByText("8h left")).toBeVisible();
+  const item = page.locator(".medication-item");
+  const cooldownHeight = (await item.boundingBox()).height;
 
-  const heightAfterTap = (await item.boundingBox()).height;
-  expect(heightAfterTap).toBe(heightBeforeTap);
+  // Revert to Active, then log again — Cooldown's own height must not
+  // drift across the round trip.
+  await cardTapTarget(page, "Aspirin").click();
+  await cardTapTarget(page, "Aspirin").click();
+  await expect(page.getByText("8h left")).toBeVisible();
+  const cooldownHeightAgain = (await item.boundingBox()).height;
+  expect(cooldownHeightAgain).toBe(cooldownHeight);
 });
 
-test("shows no fill or countdown text on an Active (non-cooldown) card", async ({ page }) => {
+test("shows no fill on an Active (non-cooldown) card, but does show the shared top-strip text (MED-38, corrected per Jira comment 10320)", async ({
+  page,
+}) => {
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
   const item = page.locator(".medication-item");
   await expect(item).toHaveClass(/active/);
   await expect(item).not.toHaveClass(/cooldown/);
-  await expect(item.locator(".cooldown-countdown")).toBeHidden();
+  // A never-logged Active card shows "Not yet taken" in the same slot
+  // Cooldown's own countdown occupies, not a hidden/empty element.
+  await expect(item.locator(".cooldown-countdown")).toHaveText("Not yet taken");
 });
 
 test("the fill recedes proportionally to elapsed cooldown time, and reactivation + zero fill happen together (running, unpaused cooldown)", async ({
@@ -632,7 +645,9 @@ test("the fill recedes proportionally to elapsed cooldown time, and reactivation
   await expect(item).toHaveClass(/active/);
   await expect(item).not.toHaveClass(/cooldown/);
   await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Log Aspirin dose now");
-  await expect(item.locator(".cooldown-countdown")).toBeHidden();
+  // MED-38: the shared slot now reads a wear-off-relative "1m ago" (60s past
+  // the 8h wear-off instant) rather than being hidden.
+  await expect(item.locator(".cooldown-countdown")).toHaveText("1m ago");
 });
 
 test("the countdown's seconds component ticks live once per second, without waiting for a reload", async ({
@@ -674,7 +689,7 @@ test("editing the interval mid-cooldown (via the Edit dialog, MED-32) does not d
 // --- MED-33: compact card redesign (remove pill, shrink card, reposition
 // icon row + countdown text) -----------------------------------------------
 
-test("Active and Cooldown render at identical card height for the same medication, measured via getBoundingClientRect, not visual inspection alone (MED-33 AC6, extends MED-18)", async ({
+test("Active and Cooldown cards render at identical height, restored after a brief MED-38 regression (MED-18/MED-33 AC6, corrected per Jira comment 10320's AC7)", async ({
   page,
 }) => {
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
@@ -685,13 +700,24 @@ test("Active and Cooldown render at identical card height for the same medicatio
   await cardTapTarget(page, "Aspirin").click();
   await expect(item).toHaveClass(/cooldown/);
   const cooldownHeight = await item.evaluate((el) => el.getBoundingClientRect().height);
-  expect(cooldownHeight).toBe(activeHeight);
 
-  // Round-trips back to Active (tap-to-cancel, MED-34) at the same height.
+  // MED-38's first shipped version added a separate "last taken" line that
+  // only rendered on Active cards, making Active taller than Cooldown. The
+  // scope correction (Jira comment 10320, AC7) folds that text into the
+  // existing shared `.cooldown-countdown` slot instead, so both states
+  // reserve exactly the same space again — the original MED-18/MED-33
+  // invariant this test protects.
+  expect(activeHeight).toBe(cooldownHeight);
+
   await cardTapTarget(page, "Aspirin").click();
   await expect(item).toHaveClass(/active/);
   const activeHeightAgain = await item.evaluate((el) => el.getBoundingClientRect().height);
   expect(activeHeightAgain).toBe(activeHeight);
+
+  await cardTapTarget(page, "Aspirin").click();
+  await expect(item).toHaveClass(/cooldown/);
+  const cooldownHeightAgain = await item.evaluate((el) => el.getBoundingClientRect().height);
+  expect(cooldownHeightAgain).toBe(cooldownHeight);
 });
 
 test("no status pill renders anywhere on the card in either state — state is color-only via active/cooldown classes (MED-33 AC2)", async ({
@@ -755,6 +781,70 @@ test("Edit/Delete/Reset render together in one row/strip, top-right, sharing it 
   // ...and entirely above the name/dose row further down the card, not
   // sharing a flex row with it.
   expect(editBox.y + editBox.height).toBeLessThanOrEqual(nameBox.y + 1);
+});
+
+// --- MED-38: shared top-strip "last taken" text on Active cards, corrected
+// per Jira comment 10320 (folded into the existing Cooldown-countdown slot,
+// measured from wear-off rather than the dose timestamp, colored green) ----
+
+test("an Active card that has never been logged shows the literal 'Not yet taken' text in the shared top-strip slot (AC3)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const item = page.locator(".medication-item");
+  await expect(item.locator(".cooldown-countdown")).toBeVisible();
+  await expect(item.locator(".cooldown-countdown")).toHaveText("Not yet taken");
+});
+
+test("the instant a Cooldown naturally reactivates to Active, the shared slot reads 'Just now' — measured from when the cooldown wore off, not the original dose timestamp — then counts up live as real time passes (AC1, AC2, AC5, the core scope correction)", async ({
+  page,
+}) => {
+  await installFrozenClock(page);
+
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await cardTapTarget(page, "Aspirin").click();
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/cooldown/);
+
+  // Advance to 1s past the 8h interval so the card reactivates on its own
+  // (MED-9/10), with no user action — the exact moment AC5 is about. Before
+  // the scope correction this read "8h ago" (the full interval, measured
+  // from the dose) here; it must now read "Just now" (measured from
+  // wear-off instead).
+  await advanceAndFreeze(page, 8 * 60 * 60 * 1000 + 1000);
+  await expect(item).toHaveClass(/active/);
+  await expect(item.locator(".cooldown-countdown")).toHaveText("Just now");
+
+  // ...and count up from there as real (frozen-clock-advanced) Active time
+  // passes, rather than staying pinned at "Just now" or jumping back to a
+  // dose-relative reading.
+  await advanceAndFreeze(page, 5 * 60 * 1000);
+  await expect(item.locator(".cooldown-countdown")).toHaveText("5m ago");
+});
+
+test("a Cooldown card's own countdown text is unaffected by this change (AC4) — still the pre-existing '{remaining} left' wording", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await cardTapTarget(page, "Aspirin").click();
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/cooldown/);
+  await expect(item.locator(".cooldown-countdown")).toHaveText("8h left");
+});
+
+test("the shared slot's text is green while Active and amber while Cooldown, driven by the existing active/cooldown card classes (AC6)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const countdownText = page.locator(".medication-item .cooldown-countdown");
+  await expect(countdownText).toHaveCSS("color", "rgb(46, 110, 82)"); // --go
+
+  await cardTapTarget(page, "Aspirin").click();
+  await expect(countdownText).toHaveCSS("color", "rgb(166, 99, 31)"); // --wait
 });
 
 test("the compact card does not overflow or clip its content at a narrow ~320-375px viewport, in either state (MED-33 AC9 — spot-check vs. MED-28)", async ({
@@ -932,7 +1022,10 @@ test("a medication whose cooldown fully elapsed while the tab was closed shows A
   await expect(item).toHaveClass(/active/);
   await expect(item).not.toHaveClass(/cooldown/);
   await expect(cardTapTarget(page, "Aspirin")).toHaveAccessibleName("Log Aspirin dose now");
-  await expect(item.locator(".cooldown-countdown")).toBeHidden();
+  // MED-38: wear-off happened 1h before this reopen (9h-ago dose, 8h
+  // interval), so the shared slot reads "1h ago", not "9h ago" from the
+  // dose timestamp and not hidden.
+  await expect(item.locator(".cooldown-countdown")).toHaveText("1h ago");
 });
 
 // --- MED-34: tapping a Cooldown card cancels immediately, reverting to
@@ -956,7 +1049,10 @@ test("tapping a running Cooldown card cancels it immediately and reverts to Acti
   await expect(item).not.toHaveClass(/cooldown/);
   await expect(item).not.toHaveClass(/paused/);
   await expect(tapTarget).toHaveAccessibleName("Log Aspirin dose now");
-  await expect(item.locator(".cooldown-countdown")).toBeHidden();
+  // MED-38: cancelling nulls `lastTakenAt` (asserted below), so the
+  // reverted-to-Active card reads "Not yet taken" in the shared slot, the
+  // same as a never-logged medication — not hidden.
+  await expect(item.locator(".cooldown-countdown")).toHaveText("Not yet taken");
 
   const stored = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("medications"))
@@ -1708,6 +1804,12 @@ test("a status change on one card does not jitter its row-sharing sibling's heig
   const aspirinBoxAfter = await aspirinItem.boundingBox();
   const longNameBoxAfter = await longNameItem.boundingBox();
 
+  // MED-38 (corrected per Jira comment 10320's AC7): Active and Cooldown
+  // render at identical height again, so Aspirin's own height doesn't
+  // change here either — restoring the original MED-18/MED-33 invariant. A
+  // *sibling* row sharing the same grid row never jitters regardless,
+  // verified below via longNameItem, which never changes state in this
+  // test.
   expect(aspirinBoxAfter.height).toBe(aspirinBoxBefore.height);
   expect(longNameBoxAfter.height).toBe(longNameBoxBefore.height);
   expect(longNameBoxAfter.y).toBe(longNameBoxBefore.y);

@@ -19,6 +19,9 @@ import {
   formatCountdown,
   formatRemainingLabel,
   formatIntervalLabel,
+  formatRelativeTime,
+  formatLastTakenLabel,
+  cooldownReadyAt,
   formatCurrentDate,
 } from "../../js/medications.js";
 
@@ -1160,5 +1163,144 @@ describe("formatIntervalLabel (MED-34)", () => {
     // number-in, string-out function so callers always pass the medication's
     // *current* intervalHours (see js/app.js's updateCooldownDisplay).
     expect(formatIntervalLabel(6)).toBe("Every 6h");
+  });
+});
+
+describe("formatRelativeTime (MED-38)", () => {
+  it('returns "Not yet taken" when lastTakenAt is null', () => {
+    expect(formatRelativeTime(null, Date.now())).toBe("Not yet taken");
+  });
+
+  it('returns "Not yet taken" when lastTakenAt is undefined', () => {
+    expect(formatRelativeTime(undefined, Date.now())).toBe("Not yet taken");
+  });
+
+  it('returns "Not yet taken" for an unparseable lastTakenAt (corrupted storage), mirroring isInCooldown\'s own guard', () => {
+    expect(formatRelativeTime("not a date", Date.now())).toBe("Not yet taken");
+  });
+
+  it('returns "Just now" at zero elapsed time', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), takenAt)).toBe("Just now");
+  });
+
+  it('returns "Just now" for any elapsed time under a minute', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 59_000;
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("Just now");
+  });
+
+  it('formats exactly one elapsed minute as "1m ago"', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 60_000;
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("1m ago");
+  });
+
+  it("rounds down (floor), not up, so a partial extra minute isn't claimed yet — the opposite rounding direction from formatDuration's countdown use", () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 65_000; // 1m 5s elapsed
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("1m ago");
+  });
+
+  it('formats minutes under an hour as "Xm ago"', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 45 * 60_000;
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("45m ago");
+  });
+
+  it('formats a whole hour with no minutes remainder as "Xh ago", omitting "0m"', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 3 * 3600_000;
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("3h ago");
+  });
+
+  it('formats hours plus a minutes remainder as "Xh Ym ago"', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 3 * 3600_000 + 12 * 60_000;
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("3h 12m ago");
+  });
+
+  it('formats a whole day with no hours remainder as "Xd ago", omitting "0h"', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 24 * 3600_000;
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("1d ago");
+  });
+
+  it('formats a day plus an hours remainder as "Xd Yh ago", dropping the minutes component entirely', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 25 * 3600_000 + 30 * 60_000; // 1d 1h 30m elapsed
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("1d 1h ago");
+  });
+
+  it("defaults now to Date.now() when not passed", () => {
+    const takenAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    expect(formatRelativeTime(takenAt)).toBe("5m ago");
+  });
+});
+
+describe("cooldownReadyAt (MED-38, exported per Jira comment 10320)", () => {
+  it("returns lastTakenAt plus the snapshotted cooldownIntervalHours, not the live intervalHours", () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const med = {
+      lastTakenAt: new Date(takenAt).toISOString(),
+      intervalHours: 2, // edited mid-cooldown — should NOT be what governs this
+      cooldownIntervalHours: 8, // the snapshot taken when the cooldown started
+    };
+    expect(cooldownReadyAt(med)).toBe(takenAt + 8 * 3600_000);
+  });
+
+  it("falls back to intervalHours when cooldownIntervalHours is absent (a medication logged before that field existed)", () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const med = { lastTakenAt: new Date(takenAt).toISOString(), intervalHours: 4 };
+    expect(cooldownReadyAt(med)).toBe(takenAt + 4 * 3600_000);
+  });
+});
+
+describe("formatLastTakenLabel (MED-38, corrected per Jira comment 10320)", () => {
+  it('returns "Not yet taken" when lastTakenAt is null', () => {
+    const med = { lastTakenAt: null, intervalHours: 8 };
+    expect(formatLastTakenLabel(med, Date.now())).toBe("Not yet taken");
+  });
+
+  it('returns "Not yet taken" when lastTakenAt is undefined', () => {
+    const med = { intervalHours: 8 };
+    expect(formatLastTakenLabel(med, Date.now())).toBe("Not yet taken");
+  });
+
+  it('reads "Just now" the instant a cooldown ends — measured from wear-off (cooldownReadyAt), not the original dose timestamp, the core scope correction', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const med = {
+      lastTakenAt: new Date(takenAt).toISOString(),
+      intervalHours: 8,
+      cooldownIntervalHours: 8,
+    };
+    const wearOffAt = takenAt + 8 * 3600_000;
+    // Exactly at wear-off: zero elapsed since cooldownReadyAt, even though
+    // 8h have elapsed since the dose itself — the pre-correction bug would
+    // have shown "8h ago" here instead.
+    expect(formatLastTakenLabel(med, wearOffAt)).toBe("Just now");
+  });
+
+  it('counts up from "Just now" as real Active time passes after wear-off', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const med = {
+      lastTakenAt: new Date(takenAt).toISOString(),
+      intervalHours: 8,
+      cooldownIntervalHours: 8,
+    };
+    const wearOffAt = takenAt + 8 * 3600_000;
+    expect(formatLastTakenLabel(med, wearOffAt + 5 * 60_000)).toBe("5m ago");
+    expect(formatLastTakenLabel(med, wearOffAt + 3 * 3600_000)).toBe("3h ago");
+  });
+
+  it("defaults now to Date.now() when not passed", () => {
+    const med = {
+      lastTakenAt: new Date(Date.now() - 8 * 3600_000).toISOString(),
+      intervalHours: 8,
+      cooldownIntervalHours: 8,
+    };
+    // Wear-off is exactly now (8h dose + 8h interval), so this should read
+    // "Just now", not "8h ago".
+    expect(formatLastTakenLabel(med)).toBe("Just now");
   });
 });
