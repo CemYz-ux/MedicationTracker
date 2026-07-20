@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<WebView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/webView"
+<!--
+    SwipeRefreshLayout wraps the fullscreen WebView to provide the manual
+    pull-to-refresh escape hatch (MED-41) around the cache-first WebSettings.LOAD_CACHE_ELSE_NETWORK
+    mode set in MainActivity. It only triggers when the WebView itself is scrolled to the
+    top (standard SwipeRefreshLayout behavior via canChildScrollUp()), so it never
+    interferes with normal scrolling inside the medication list.
+-->
+<androidx.swiperefreshlayout.widget.SwipeRefreshLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/swipeRefreshLayout"
     android:layout_width="match_parent"
-    android:layout_height="match_parent" />
+    android:layout_height="match_parent">
+
+    <WebView
+        android:id="@+id/webView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+</androidx.swiperefreshlayout.widget.SwipeRefreshLayout>

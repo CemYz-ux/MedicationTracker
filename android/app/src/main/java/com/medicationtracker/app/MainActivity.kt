@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -13,6 +14,7 @@ import android.webkit.WebViewClient
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 
 /**
  * Thin WebView shell around the existing static web app, loaded live from its
@@ -21,7 +23,10 @@ import androidx.core.content.ContextCompat
  * only wires up the WebView itself, the notification-permission prompt, and keeps
  * navigation confined to our own origin (see [RestrictedWebViewClient]). Reminder
  * scheduling is handled by [WebAppBridge], which the web app calls via
- * `window.AndroidBridge`.
+ * `window.AndroidBridge`. A `SwipeRefreshLayout` (see `activity_main.xml`) wraps the
+ * WebView so a pull-down gesture can manually force past the cache-first
+ * `LOAD_CACHE_ELSE_NETWORK` mode below (MED-41) — the only other new UI on top of the
+ * otherwise chrome-free fullscreen WebView.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -40,6 +45,7 @@ class MainActivity : AppCompatActivity() {
         NotificationHelper(applicationContext).createChannel()
         requestNotificationPermissionIfNeeded()
 
+        val swipeRefreshLayout = findViewById<SwipeRefreshLayout>(R.id.swipeRefreshLayout)
         val webView = findViewById<WebView>(R.id.webView)
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
@@ -47,11 +53,30 @@ class MainActivity : AppCompatActivity() {
         // network if nothing's cached, rather than the default mode which typically fails
         // outright on a fresh launch with no network. Not a guaranteed offline mode — still
         // fails on a genuine first-ever launch with no network, and is subject to GitHub
-        // Pages' cache headers and Android's disk-cache eviction.
+        // Pages' cache headers and Android's disk-cache eviction. The pull-to-refresh
+        // gesture below is the user-facing escape hatch for when this mode serves a stale
+        // page; it does not change this setting.
         webView.settings.cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
-        webView.webViewClient = RestrictedWebViewClient()
+        webView.webViewClient = RestrictedWebViewClient(
+            onMainFrameLoadFinished = { swipeRefreshLayout.isRefreshing = false }
+        )
         webView.addJavascriptInterface(WebAppBridge(applicationContext), "AndroidBridge")
         webView.loadUrl(APP_URL)
+
+        swipeRefreshLayout.setColorSchemeResources(R.color.brand_green)
+        swipeRefreshLayout.setOnRefreshListener {
+            // MED-41: manual, one-off bypass of LOAD_CACHE_ELSE_NETWORK for when a new web
+            // deploy is stuck behind a stale cached snapshot. clearCache(true) clears only
+            // the HTTP resource cache (the cached HTML/CSS/JS responses) — per the WebView
+            // API contract this is distinct from DOM/Web Storage, so localStorage (where all
+            // medication records live) is untouched. cacheMode itself is left set to
+            // LOAD_CACHE_ELSE_NETWORK for every subsequent ordinary launch; this is not a
+            // permanent mode change. The refresh spinner is stopped from
+            // RestrictedWebViewClient once the reload genuinely finishes (or fails), not on
+            // a fixed timer.
+            webView.clearCache(true)
+            webView.loadUrl(APP_URL)
+        }
     }
 
     /**
@@ -64,8 +89,18 @@ class MainActivity : AppCompatActivity() {
      * navigating the WebView itself there, so the native bridge is never reachable from
      * an untrusted origin. This does not run for the initial `loadUrl` call above, only
      * for subsequent navigations (link taps, redirects, etc.).
+     *
+     * Also reports back when the main-frame navigation genuinely settles — either finished
+     * ([onPageFinished]) or failed ([onReceivedError]) — via [onMainFrameLoadFinished], which
+     * MED-41's pull-to-refresh gesture uses to stop the refresh spinner. `onPageFinished` is
+     * only ever invoked for the main frame (per the WebViewClient contract), but
+     * `onReceivedError` can also fire for sub-resources, so that one is explicitly filtered
+     * to `request.isForMainFrame` to avoid stopping the spinner early on an unrelated failed
+     * image/script load.
      */
-    private class RestrictedWebViewClient : WebViewClient() {
+    private class RestrictedWebViewClient(
+        private val onMainFrameLoadFinished: () -> Unit
+    ) : WebViewClient() {
         override fun shouldOverrideUrlLoading(
             view: WebView,
             request: WebResourceRequest
@@ -78,6 +113,22 @@ class MainActivity : AppCompatActivity() {
             }
             view.context.startActivity(Intent(Intent.ACTION_VIEW, uri))
             return true
+        }
+
+        override fun onPageFinished(view: WebView, url: String?) {
+            super.onPageFinished(view, url)
+            onMainFrameLoadFinished()
+        }
+
+        override fun onReceivedError(
+            view: WebView,
+            request: WebResourceRequest,
+            error: WebResourceError
+        ) {
+            super.onReceivedError(view, request, error)
+            if (request.isForMainFrame) {
+                onMainFrameLoadFinished()
+            }
         }
     }
 
