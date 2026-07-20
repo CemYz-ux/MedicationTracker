@@ -90,13 +90,22 @@ class MainActivity : AppCompatActivity() {
      * an untrusted origin. This does not run for the initial `loadUrl` call above, only
      * for subsequent navigations (link taps, redirects, etc.).
      *
-     * Also reports back when the main-frame navigation genuinely settles — either finished
-     * ([onPageFinished]) or failed ([onReceivedError]) — via [onMainFrameLoadFinished], which
-     * MED-41's pull-to-refresh gesture uses to stop the refresh spinner. `onPageFinished` is
-     * only ever invoked for the main frame (per the WebViewClient contract), but
-     * `onReceivedError` can also fire for sub-resources, so that one is explicitly filtered
-     * to `request.isForMainFrame` to avoid stopping the spinner early on an unrelated failed
-     * image/script load.
+     * Also reports back when the main-frame navigation genuinely settles — finished
+     * ([onPageFinished]), failed ([onReceivedError]), or was intercepted and handed off to
+     * an external browser ([shouldOverrideUrlLoading]) — via [onMainFrameLoadFinished],
+     * which MED-41's pull-to-refresh gesture uses to stop the refresh spinner. From the
+     * spinner's perspective, a hand-off is just as settled an outcome as a genuine finish:
+     * if the pull-to-refresh reload's `loadUrl(APP_URL)` were ever intercepted here instead
+     * of reaching [onPageFinished]/[onReceivedError] (e.g. APP_URL redirecting outside
+     * [ALLOWED_HOST]/[ALLOWED_PATH_PREFIX]), neither of those callbacks would fire and the
+     * spinner would spin forever with no self-healing path. `onPageFinished` is only ever
+     * invoked for the main frame (per the WebViewClient contract), but `onReceivedError` and
+     * `shouldOverrideUrlLoading` can also fire for sub-resources/sub-frames, so both are
+     * explicitly filtered to `request.isForMainFrame` to avoid stopping the spinner early on
+     * an unrelated failed image/script load or a hypothetical future iframe navigation. Each
+     * of the three paths is mutually exclusive for a given navigation attempt (a load either
+     * finishes, errors, or gets intercepted — never more than one), so
+     * [onMainFrameLoadFinished] fires exactly once per attempt.
      */
     private class RestrictedWebViewClient(
         private val onMainFrameLoadFinished: () -> Unit
@@ -110,6 +119,9 @@ class MainActivity : AppCompatActivity() {
                 (uri.path ?: "").startsWith(ALLOWED_PATH_PREFIX)
             if (isOwnOrigin) {
                 return false
+            }
+            if (request.isForMainFrame) {
+                onMainFrameLoadFinished()
             }
             view.context.startActivity(Intent(Intent.ACTION_VIEW, uri))
             return true
