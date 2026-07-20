@@ -517,46 +517,33 @@ button:hover {
   color: var(--ink-soft);
 }
 
-/* MED-38: the "last taken" relative-time line, Active-only — hidden via the
-   native `hidden` attribute (see `updateCooldownDisplay` in app.js), not a
-   visibility toggle, so it takes up no space at all on a Cooldown card
-   rather than reserving dead room the way `.cooldown-countdown` does for
-   its own (both-states-shared) top strip. That's a deliberate difference:
-   this line is allowed to grow the Active card's height (per MED-38's AC),
-   unlike the top strip, which MED-18/MED-33 require to stay pixel-identical
-   across states. */
-.last-taken {
-  margin: 0;
-  font-family: var(--font-sans);
-  font-size: 0.75rem;
-  color: var(--ink-soft);
-}
-
-/* Live countdown text on a cooldown card, e.g. "3h 12m 45s left" —
-   supplementary to the card's `--progress` fill, never a substitute for it.
+/* Live top-strip text shared by both card states — the "{remaining} left"
+   Cooldown countdown, or (MED-38, corrected per Jira comment 10320) an
+   Active-state "last taken" relative-time reading ("Just now", "12m ago",
+   or "Not yet taken") — never a separate line, so this one slot is always
+   populated and always reserves the same space regardless of state.
+   Supplementary to the card's `--progress` fill during Cooldown, never a
+   substitute for it.
    MED-33: relocated from the card's bottom-right corner (MED-18's original
    position) to the top-left of the top strip it now shares with
    `.header-actions`, per direct user follow-up ("so the card doesn't change
    size when clicked").
-   Unlike the old bottom-right version — out of flow via
-   `position: absolute`, with `.medication-item`'s own padding reserving its
-   space — this element is a normal in-flow child of `.card-tap-target` now,
-   so it has to reserve its own space directly. `min-height` matches
-   `.icon-btn`'s 44px touch target (MED-19) so `.header-actions`, absolutely
-   positioned on top of this same row, never overlaps the name/dose/stat row
-   that follows, regardless of whether this text is one line, wrapped, or
-   empty.
-   MED-18's "always reserve, never conditionally grow/shrink" guarantee
-   still holds, just via the `.is-hidden` modifier below (`visibility`)
-   instead of the `hidden` attribute the old absolutely-positioned version
-   used — `hidden` maps to `display: none`, which would collapse *this*
-   element's height now that it's in normal flow (irrelevant for the old
-   version, already out of flow either way). `visibility: hidden` keeps the
-   box — and its reserved height — while removing the text from view and
-   the accessibility tree.
+   This element is a normal in-flow child of `.card-tap-target`, so it has
+   to reserve its own space directly. `min-height` matches `.icon-btn`'s
+   44px touch target (MED-19) so `.header-actions`, absolutely positioned on
+   top of this same row, never overlaps the name/dose/stat row that
+   follows, regardless of whether this text is one line, wrapped, or empty.
    `padding-right` reserves room so the text can never visually run
    underneath `.header-actions`: three 44px icon buttons + two 0.5rem gaps
-   is 9.25rem, rounded up for a small safety margin. */
+   is 9.25rem, rounded up for a small safety margin.
+   MED-38 (original shipped version) briefly gave this element an
+   `.is-hidden` (`visibility: hidden`) modifier to hide the Cooldown
+   countdown on Active cards, alongside a separate always-in-DOM
+   `.last-taken` line beneath name/dose. The scope correction folded the
+   "last taken" text into *this* slot instead — both states always show
+   something here now, so neither `.is-hidden` nor `.last-taken` is needed
+   any more; color alone (see the two rules below) now signals which state
+   produced the text. */
 .cooldown-countdown {
   display: flex;
   align-items: center;
@@ -566,12 +553,22 @@ button:hover {
   font-family: var(--font-sans);
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--wait);
   text-align: left;
 }
 
-.cooldown-countdown.is-hidden {
-  visibility: hidden;
+/* MED-38: green while Active (the same semantic green as this state's own
+   card border/tint, `--go`) vs. the existing amber while Cooldown (`--wait`,
+   unchanged from before this story) — driven by the existing
+   `.medication-item.active`/`.medication-item.cooldown` classes
+   (`setCardStatus` in app.js) rather than a new JS-toggled modifier class,
+   since the color is entirely a function of which state the card is
+   already in. */
+.medication-item.active .cooldown-countdown {
+  color: var(--go);
+}
+
+.medication-item.cooldown .cooldown-countdown {
+  color: var(--wait);
 }
 
 .row-error {
