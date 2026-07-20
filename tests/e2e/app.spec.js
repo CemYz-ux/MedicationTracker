@@ -585,7 +585,7 @@ test("shows a live countdown in '{remaining} left' format after tapping, and the
   await expect(item).toHaveCSS("--progress", "100%");
 });
 
-test("tapping to log does not change the card's height, even though it reveals countdown text (MED-18)", async ({
+test("a Cooldown card's own height stays fixed across repeated tap cycles (MED-18; MED-38 update — Active is no longer the same height, see the MED-33 AC6 test below)", async ({
   page,
 }) => {
   await page.clock.install();
@@ -593,14 +593,19 @@ test("tapping to log does not change the card's height, even though it reveals c
 
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
 
-  const item = page.locator(".medication-item");
-  const heightBeforeTap = (await item.boundingBox()).height;
-
   await cardTapTarget(page, "Aspirin").click();
   await expect(page.getByText("8h left")).toBeVisible();
+  const item = page.locator(".medication-item");
+  const cooldownHeight = (await item.boundingBox()).height;
 
-  const heightAfterTap = (await item.boundingBox()).height;
-  expect(heightAfterTap).toBe(heightBeforeTap);
+  // Revert to Active, then log again — Cooldown's own height (with the
+  // MED-38 last-taken line hidden, per AC4) must not drift across the
+  // round trip, even though Active's height changed underneath it.
+  await cardTapTarget(page, "Aspirin").click();
+  await cardTapTarget(page, "Aspirin").click();
+  await expect(page.getByText("8h left")).toBeVisible();
+  const cooldownHeightAgain = (await item.boundingBox()).height;
+  expect(cooldownHeightAgain).toBe(cooldownHeight);
 });
 
 test("shows no fill or countdown text on an Active (non-cooldown) card", async ({ page }) => {
@@ -674,7 +679,7 @@ test("editing the interval mid-cooldown (via the Edit dialog, MED-32) does not d
 // --- MED-33: compact card redesign (remove pill, shrink card, reposition
 // icon row + countdown text) -----------------------------------------------
 
-test("Active and Cooldown render at identical card height for the same medication, measured via getBoundingClientRect, not visual inspection alone (MED-33 AC6, extends MED-18)", async ({
+test("Cooldown's card height stays fixed across state changes; Active is now taller due to the MED-38 last-taken line, superseding this test's prior Active===Cooldown equality assertion (MED-33 AC6, extends MED-18)", async ({
   page,
 }) => {
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
@@ -685,13 +690,24 @@ test("Active and Cooldown render at identical card height for the same medicatio
   await cardTapTarget(page, "Aspirin").click();
   await expect(item).toHaveClass(/cooldown/);
   const cooldownHeight = await item.evaluate((el) => el.getBoundingClientRect().height);
-  expect(cooldownHeight).toBe(activeHeight);
 
-  // Round-trips back to Active (tap-to-cancel, MED-34) at the same height.
+  // MED-38: Active now shows a "last taken" line Cooldown intentionally
+  // omits (AC4), so the two states no longer render at identical height —
+  // this is an accepted, deliberate change, not a regression. What must
+  // still hold — the actual MED-18/MED-33 guarantee this test protects — is
+  // that a Cooldown card's own height, and an Active card's own height,
+  // each stay self-consistent across repeated toggles.
+  expect(activeHeight).toBeGreaterThan(cooldownHeight);
+
   await cardTapTarget(page, "Aspirin").click();
   await expect(item).toHaveClass(/active/);
   const activeHeightAgain = await item.evaluate((el) => el.getBoundingClientRect().height);
   expect(activeHeightAgain).toBe(activeHeight);
+
+  await cardTapTarget(page, "Aspirin").click();
+  await expect(item).toHaveClass(/cooldown/);
+  const cooldownHeightAgain = await item.evaluate((el) => el.getBoundingClientRect().height);
+  expect(cooldownHeightAgain).toBe(cooldownHeight);
 });
 
 test("no status pill renders anywhere on the card in either state — state is color-only via active/cooldown classes (MED-33 AC2)", async ({
@@ -755,6 +771,68 @@ test("Edit/Delete/Reset render together in one row/strip, top-right, sharing it 
   // ...and entirely above the name/dose row further down the card, not
   // sharing a flex row with it.
   expect(editBox.y + editBox.height).toBeLessThanOrEqual(nameBox.y + 1);
+});
+
+// --- MED-38: "last taken" relative-time line on Active cards -------------
+
+test("an Active card that has never been logged shows the literal 'Not yet taken' text, not a hidden/missing line (AC3)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+
+  const item = page.locator(".medication-item");
+  await expect(item.locator(".last-taken")).toBeVisible();
+  await expect(item.locator(".last-taken")).toHaveText("Not yet taken");
+});
+
+test("an Active card that reactivated naturally shows a correct relative 'last taken' time from the very first render after flipping to Active — no stale or '0s ago' flash (AC1, AC5)", async ({
+  page,
+}) => {
+  await installFrozenClock(page);
+
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await cardTapTarget(page, "Aspirin").click();
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/cooldown/);
+
+  // Advance past the 8h interval so the card reactivates on its own
+  // (MED-9/10), with no user action — the exact moment AC5 is about.
+  await advanceAndFreeze(page, 8 * 60 * 60 * 1000 + 1000);
+  await expect(item).toHaveClass(/active/);
+
+  // The correct elapsed time (~8h) from the moment the dose was actually
+  // logged, not a "Just now"/"0s ago" flash from the reactivation instant
+  // itself.
+  await expect(item.locator(".last-taken")).toHaveText("8h ago");
+});
+
+test("a Cooldown card shows no 'last taken' line at all — no new line, no layout change there (AC4)", async ({
+  page,
+}) => {
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await cardTapTarget(page, "Aspirin").click();
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/cooldown/);
+  await expect(item.locator(".last-taken")).toBeHidden();
+});
+
+test("the 'last taken' line keeps ticking live on the existing periodic re-check while a card stays Active, without a reload (AC2)", async ({
+  page,
+}) => {
+  await installFrozenClock(page);
+
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await cardTapTarget(page, "Aspirin").click();
+  await advanceAndFreeze(page, 8 * 60 * 60 * 1000 + 1000);
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/active/);
+  await expect(item.locator(".last-taken")).toHaveText("8h ago");
+
+  await advanceAndFreeze(page, 5 * 60 * 1000);
+  await expect(item.locator(".last-taken")).toHaveText("8h 5m ago");
 });
 
 test("the compact card does not overflow or clip its content at a narrow ~320-375px viewport, in either state (MED-33 AC9 — spot-check vs. MED-28)", async ({
@@ -1708,7 +1786,11 @@ test("a status change on one card does not jitter its row-sharing sibling's heig
   const aspirinBoxAfter = await aspirinItem.boundingBox();
   const longNameBoxAfter = await longNameItem.boundingBox();
 
-  expect(aspirinBoxAfter.height).toBe(aspirinBoxBefore.height);
+  // MED-38: Aspirin's own height is now expected to *change* here — logging
+  // a dose hides its Active-only last-taken line (AC4), shrinking the card.
+  // The real guarantee this test protects (MED-18/MED-22 AC8) is that a
+  // *sibling* row sharing the same grid row never jitters because of that —
+  // verified below via longNameItem, which never changes state in this test.
   expect(longNameBoxAfter.height).toBe(longNameBoxBefore.height);
   expect(longNameBoxAfter.y).toBe(longNameBoxBefore.y);
   expect(aspirinBoxAfter.height).toBeLessThan(longNameBoxAfter.height);

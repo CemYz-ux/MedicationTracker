@@ -443,6 +443,52 @@ export function formatIntervalLabel(intervalHours) {
 }
 
 /**
+ * The "last taken" line shown on an Active card (MED-38), e.g. "Just now",
+ * "12m ago", "3h 5m ago", "1d 2h ago" — or the literal "Not yet taken" when
+ * `lastTakenAt` is `null`/falsy (never logged) or unparseable (corrupted
+ * storage), mirroring `isInCooldown`'s own guard for that case.
+ *
+ * Deliberately a *separate* implementation from `formatDuration`, not a
+ * thin wrapper around it, despite the shared "Xh Ym", zero-component-
+ * omission phrasing style: `formatDuration` rounds its minutes/seconds *up*
+ * (`Math.ceil`) so a live countdown's remaining time never flashes a
+ * misleading "0m"/"0s" in its final moments. A "how long ago" readout has
+ * the opposite correctness requirement — rounding up would claim *more*
+ * time has elapsed than truly has (e.g. 61s ago reading "2m ago"). This
+ * function rounds down (`Math.floor`) instead, so "Xm ago" always means "at
+ * least X whole minutes have elapsed", the conventional meaning of a
+ * relative-time readout. Adds a day-level component (absent from
+ * `formatDuration`) since, unlike a cooldown countdown (bounded by a
+ * medication's interval, realistically well under a day), "last taken" can
+ * meaningfully be days ago.
+ *
+ * `now` (epoch millis) is injectable for deterministic tests; it defaults
+ * to `Date.now()`, the same discipline as every other `now`-taking function
+ * in this module.
+ */
+export function formatRelativeTime(lastTakenAt, now = Date.now()) {
+  if (!lastTakenAt) return "Not yet taken";
+  const takenAtMs = new Date(lastTakenAt).getTime();
+  if (Number.isNaN(takenAtMs)) return "Not yet taken";
+
+  const elapsedMs = Math.max(0, now - takenAtMs);
+  if (elapsedMs < 60_000) return "Just now";
+
+  const totalMinutes = Math.floor(elapsedMs / 60_000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) {
+    return hours > 0 ? `${days}d ${hours}h ago` : `${days}d ago`;
+  }
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m ago` : `${hours}h ago`;
+  }
+  return `${minutes}m ago`;
+}
+
+/**
  * Formats a date as a "Weekday, Month Day" string, e.g. "Sunday, July 12" —
  * used in place of the static "Your medications" heading so the grey list
  * card orients the user to the day it's showing. Defaults to "now" but

@@ -517,6 +517,21 @@ button:hover {
   color: var(--ink-soft);
 }
 
+/* MED-38: the "last taken" relative-time line, Active-only — hidden via the
+   native `hidden` attribute (see `updateCooldownDisplay` in app.js), not a
+   visibility toggle, so it takes up no space at all on a Cooldown card
+   rather than reserving dead room the way `.cooldown-countdown` does for
+   its own (both-states-shared) top strip. That's a deliberate difference:
+   this line is allowed to grow the Active card's height (per MED-38's AC),
+   unlike the top strip, which MED-18/MED-33 require to stay pixel-identical
+   across states. */
+.last-taken {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
+
 /* Live countdown text on a cooldown card, e.g. "3h 12m 45s left" —
    supplementary to the card's `--progress` fill, never a substitute for it.
    MED-33: relocated from the card's bottom-right corner (MED-18's original

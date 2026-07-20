@@ -19,6 +19,7 @@ import {
   formatCountdown,
   formatRemainingLabel,
   formatIntervalLabel,
+  formatRelativeTime,
   formatCurrentDate,
 } from "../../js/medications.js";
 
@@ -1160,5 +1161,77 @@ describe("formatIntervalLabel (MED-34)", () => {
     // number-in, string-out function so callers always pass the medication's
     // *current* intervalHours (see js/app.js's updateCooldownDisplay).
     expect(formatIntervalLabel(6)).toBe("Every 6h");
+  });
+});
+
+describe("formatRelativeTime (MED-38)", () => {
+  it('returns "Not yet taken" when lastTakenAt is null', () => {
+    expect(formatRelativeTime(null, Date.now())).toBe("Not yet taken");
+  });
+
+  it('returns "Not yet taken" when lastTakenAt is undefined', () => {
+    expect(formatRelativeTime(undefined, Date.now())).toBe("Not yet taken");
+  });
+
+  it('returns "Not yet taken" for an unparseable lastTakenAt (corrupted storage), mirroring isInCooldown\'s own guard', () => {
+    expect(formatRelativeTime("not a date", Date.now())).toBe("Not yet taken");
+  });
+
+  it('returns "Just now" at zero elapsed time', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), takenAt)).toBe("Just now");
+  });
+
+  it('returns "Just now" for any elapsed time under a minute', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 59_000;
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("Just now");
+  });
+
+  it('formats exactly one elapsed minute as "1m ago"', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 60_000;
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("1m ago");
+  });
+
+  it("rounds down (floor), not up, so a partial extra minute isn't claimed yet — the opposite rounding direction from formatDuration's countdown use", () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 65_000; // 1m 5s elapsed
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("1m ago");
+  });
+
+  it('formats minutes under an hour as "Xm ago"', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 45 * 60_000;
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("45m ago");
+  });
+
+  it('formats a whole hour with no minutes remainder as "Xh ago", omitting "0m"', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 3 * 3600_000;
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("3h ago");
+  });
+
+  it('formats hours plus a minutes remainder as "Xh Ym ago"', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 3 * 3600_000 + 12 * 60_000;
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("3h 12m ago");
+  });
+
+  it('formats a whole day with no hours remainder as "Xd ago", omitting "0h"', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 24 * 3600_000;
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("1d ago");
+  });
+
+  it('formats a day plus an hours remainder as "Xd Yh ago", dropping the minutes component entirely', () => {
+    const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
+    const now = takenAt + 25 * 3600_000 + 30 * 60_000; // 1d 1h 30m elapsed
+    expect(formatRelativeTime(new Date(takenAt).toISOString(), now)).toBe("1d 1h ago");
+  });
+
+  it("defaults now to Date.now() when not passed", () => {
+    const takenAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    expect(formatRelativeTime(takenAt)).toBe("5m ago");
   });
 });

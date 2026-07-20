@@ -11,6 +11,7 @@ import {
   isInCooldown,
   getCooldownProgress,
   formatRemainingLabel,
+  formatRelativeTime,
   formatCurrentDate,
 } from "./medications.js";
 import { syncReminders, cancelReminder } from "./androidBridge.js";
@@ -120,7 +121,7 @@ function tapTargetLabel(medication, inCooldown) {
 // (so it stays current without a reload). Never touches any other
 // medication's row, keeping refresh cycles independent.
 function updateCooldownDisplay(medication, refs, now = Date.now()) {
-  const { item, cardTapTarget, countdownEl, intervalValueEl } = refs;
+  const { item, cardTapTarget, countdownEl, intervalValueEl, lastTakenEl } = refs;
   const inCooldown = isInCooldown(medication, now);
 
   setCardStatus(item, inCooldown);
@@ -131,6 +132,22 @@ function updateCooldownDisplay(medication, refs, now = Date.now()) {
   // stays correct in both Active and Cooldown states, including right after
   // an Edit-dialog interval change.
   intervalValueEl.textContent = String(medication.intervalHours);
+
+  // MED-38: the "last taken" relative-time line, Active-only (AC4 — the
+  // Cooldown countdown above already implies a recent take, so this line
+  // would be redundant there, and the ticket's AC explicitly asks for no
+  // layout change to Cooldown cards). Unlike `countdownEl`'s "always
+  // reserve the space, just toggle visibility" discipline, this element is
+  // hidden via the native `hidden` attribute (matching this file's own
+  // `emptyState`/`list` convention in `render()`) so it collapses out of
+  // flow entirely in Cooldown, rather than reserving dead space no Cooldown
+  // card needs. The text itself is always recomputed here regardless of
+  // `inCooldown`, not just when visible — so the instant a card flips from
+  // Cooldown back to Active (whether via this function's own periodic-tick
+  // call, or the tap/Reset handlers below), the line is already correct and
+  // live, never a stale or "just now"-flash render (AC5).
+  lastTakenEl.textContent = formatRelativeTime(medication.lastTakenAt, now);
+  lastTakenEl.hidden = inCooldown;
 
   if (inCooldown) {
     // MED-33: the shorter "{remaining} left" wording, relocated to the top
@@ -281,11 +298,19 @@ function renderMedicationItem(medication) {
   doseEl.className = "medication-dose";
   doseEl.textContent = medication.dose;
 
+  // MED-38: the "last taken" relative-time line — Active-only (see
+  // `updateCooldownDisplay`), stacked below name/dose so it reads as part
+  // of the same title group rather than crowding the interval stat's
+  // column. Content and visibility (`hidden`) are both set from scratch on
+  // every `updateCooldownDisplay` call below, never here.
+  const lastTakenEl = document.createElement("p");
+  lastTakenEl.className = "last-taken";
+
   // MED-33: name above dose, stacked (replaces the old single-line
   // "Name — Dose" text), per the reference screenshot.
   const titleGroup = document.createElement("div");
   titleGroup.className = "medication-title";
-  titleGroup.append(nameEl, doseEl);
+  titleGroup.append(nameEl, doseEl, lastTakenEl);
 
   // MED-33: the compact "how often" stat — a large numeral plus a small
   // uppercase caption — replacing MED-34's plain-text `.medication-interval`
@@ -375,6 +400,7 @@ function renderMedicationItem(medication) {
     cardTapTarget,
     countdownEl,
     intervalValueEl,
+    lastTakenEl,
     editButton,
     deleteButton,
     resetButton,
