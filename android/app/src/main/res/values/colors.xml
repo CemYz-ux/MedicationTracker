@@ -3,4 +3,5 @@
     <!-- Matches the web app's Active-state green (css/styles.css) so the native shell/icon feel consistent. -->
     <color name="brand_green">#2E7D32</color>
     <color name="brand_green_dark">#1B5E20</color>
+    <color name="brand_red">#C62828</color>
 </resources>
