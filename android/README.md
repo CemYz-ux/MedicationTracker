@@ -14,6 +14,17 @@ nothing's cached. That's best-effort reuse of whatever was last loaded, not a re
 mode — it still fails on a genuine first-ever launch with no network, and is subject to
 GitHub Pages' own cache headers and Android's disk-cache eviction, so don't rely on it.
 
+**Stuck on a stale cached version after a new deploy? Pull to refresh.** Because
+`LOAD_CACHE_ELSE_NETWORK` reuses whatever's cached without ever revalidating against the
+server, the app can keep showing an old snapshot indefinitely after a new web deploy, even
+with network available (MED-41). Swiping down from the top of the page triggers a manual
+one-off refresh: `webView.clearCache(true)` clears the HTTP resource cache (the cached
+HTML/CSS/JS responses) and the WebView reloads from the network. This does **not** touch
+`localStorage` — `clearCache()` only clears the HTTP resource cache, which is a distinct
+store from DOM/Web Storage — so medication records are unaffected. `cacheMode` itself is
+left as `LOAD_CACHE_ELSE_NETWORK` afterward; this is a manual bypass for that one reload,
+not a permanent mode change.
+
 ## Why this exists, and why it isn't just a WebView
 
 Android suspends a backgrounded app's JS timers (and can kill the process outright) under
@@ -72,6 +83,13 @@ asset-sync step is needed just to ship a web app change.
   still succeed if a prior load left something in the disk cache — but that's best-effort
   reuse, not a guarantee. On a genuine first-ever launch with no network (or once the cache
   is evicted), the WebView simply fails to load.
+- **Pull-to-refresh is the only escape hatch for a stale cache, by deliberate choice** — a
+  `SwipeRefreshLayout` wraps the WebView (`activity_main.xml`) rather than adding a
+  persistent visible button, since the app is intentionally chrome-free
+  (`Theme.MaterialComponents.DayNight.NoActionBar`) and a floating button risked visually
+  colliding with the web app's own bottom-right "+" add-medication FAB rendered inside the
+  page. See `MainActivity.onCreate`'s `setOnRefreshListener` and
+  `RestrictedWebViewClient.onMainFrameLoadFinished` (MED-41).
 - **Navigation is locked to our own origin** — `MainActivity.RestrictedWebViewClient`
   only lets the WebView navigate within `cemyz-ux.github.io/MedicationTracker/`; anything
   else opens in an external browser instead. This matters because `WebAppBridge` is
