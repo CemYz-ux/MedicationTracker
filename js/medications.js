@@ -422,6 +422,56 @@ export function formatCountdown(medication, now = Date.now()) {
 }
 
 /**
+ * The "till {time}" suffix MED-42 appends to `formatRemainingLabel`'s
+ * countdown text, e.g. "till 14:30" — or, when the cooldown's end instant
+ * falls on a different *local calendar date* than `now`, the short weekday
+ * name prefixed: "till Sun 10:00" (AC3). "Different calendar date" is a
+ * date comparison (year/month/day), not an "is it >24h away" one: a
+ * cooldown ending at 23:50 tonight, checked at 23:30, is only 20 minutes
+ * away but already a different calendar day once midnight passes.
+ *
+ * {time} is always 24-hour and zero-padded to two digits for both hour and
+ * minute, with no seconds ("09:05", "00:15") — and deliberately *not*
+ * locale-formatted (AC2): unlike `formatCurrentDate`, which pins
+ * `toLocaleDateString` to "en-US" for deterministic output, a 24-hour
+ * *time* has no locale-neutral option in `toLocaleTimeString` (an en-US
+ * host would render "2:30 PM" regardless of locale pinning), so this
+ * builds the "HH:MM" string by hand from `getHours()`/`getMinutes()`
+ * instead. The weekday prefix, which *is* meant to vary by name only (not
+ * by hour format), reuses `formatCurrentDate`'s "en-US" pinning approach.
+ *
+ * Derived from `cooldownReadyAt` — the exact same instant
+ * `getCooldownRemainingMs` (and so `formatRemainingLabel`'s countdown
+ * segment) counts down to — rather than, say, `now + remaining`, so the two
+ * segments can never disagree (AC4).
+ *
+ * Returns `null` (render no suffix) when the medication is not currently in
+ * cooldown, mirroring `formatRemainingLabel`'s/`formatCountdown`'s own
+ * contract. `isInCooldown` already treats a never-taken or unparseable-
+ * `lastTakenAt` medication as not-in-cooldown (see its own doc comment), so
+ * that single guard also covers AC8 here — a corrupt record can't reach the
+ * `new Date(readyAt)` below and produce a "till NaN:NaN"-shaped string.
+ */
+export function formatCooldownEndLabel(medication, now = Date.now()) {
+  if (!isInCooldown(medication, now)) return null;
+
+  const endDate = new Date(cooldownReadyAt(medication));
+  const hours = String(endDate.getHours()).padStart(2, "0");
+  const minutes = String(endDate.getMinutes()).padStart(2, "0");
+  const time = `${hours}:${minutes}`;
+
+  const nowDate = new Date(now);
+  const sameDay =
+    endDate.getFullYear() === nowDate.getFullYear() &&
+    endDate.getMonth() === nowDate.getMonth() &&
+    endDate.getDate() === nowDate.getDate();
+  if (sameDay) return `till ${time}`;
+
+  const weekday = endDate.toLocaleDateString("en-US", { weekday: "short" });
+  return `till ${weekday} ${time}`;
+}
+
+/**
  * The short "{remaining} left" countdown text shown top-left on a Cooldown
  * card (MED-33), e.g. "2h 15m 30s left" — deliberately shorter than
  * `formatCountdown`'s "{remaining} of {total} remaining" (MED-8/MED-29),
@@ -436,13 +486,20 @@ export function formatCountdown(medication, now = Date.now()) {
  * else in the app reads its output anymore, but no AC asks for its removal.
  * Returns `null` when the medication is not currently in cooldown, mirroring
  * `formatCountdown`'s own contract.
+ *
+ * MED-42 appends `formatCooldownEndLabel`'s "till {time}" suffix, separated
+ * by " · " (AC1) — e.g. "2h 15m 30s left · till 14:30". That call is
+ * guaranteed non-null here: it returns null under the exact same
+ * not-in-cooldown condition this function has already ruled out via its own
+ * `isInCooldown` guard above, so there's no need for a fallback branch.
  */
 export function formatRemainingLabel(medication, now = Date.now()) {
   if (!isInCooldown(medication, now)) return null;
   const remaining = formatDuration(getCooldownRemainingMs(medication, now), {
     includeSeconds: true,
   });
-  return `${remaining} left`;
+  const endLabel = formatCooldownEndLabel(medication, now);
+  return `${remaining} left · ${endLabel}`;
 }
 
 /**
