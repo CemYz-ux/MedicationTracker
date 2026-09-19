@@ -832,7 +832,14 @@ test("a Cooldown card's own countdown text is unaffected by this change (AC4) �
 
   const item = page.locator(".medication-item");
   await expect(item).toHaveClass(/cooldown/);
-  await expect(item.locator(".cooldown-countdown")).toHaveText("8h left");
+  // MED-42 appended a "· till {time}" suffix to this same text — the
+  // "8h left" *wording* this test protects is still there (a prefix of the
+  // full string), just no longer the whole of it. The suffix's exact time
+  // isn't asserted here (no frozen clock in this test) — that's covered by
+  // the dedicated MED-42 tests below.
+  await expect(item.locator(".cooldown-countdown")).toHaveText(
+    /^8h left · till (?:[A-Za-z]{3} )?\d{2}:\d{2}$/
+  );
 });
 
 test("the shared slot's text is green while Active and amber while Cooldown, driven by the existing active/cooldown card classes (AC6)", async ({
@@ -845,6 +852,209 @@ test("the shared slot's text is green while Active and amber while Cooldown, dri
 
   await cardTapTarget(page, "Aspirin").click();
   await expect(countdownText).toHaveCSS("color", "rgb(166, 99, 31)"); // --wait
+});
+
+// --- MED-42: wall-clock "till {time}" suffix on the Cooldown countdown ---
+
+test("a Cooldown card's strip shows both the remaining-time segment and a 'till' time consistent with the countdown, in 24-hour zero-padded HH:MM (AC1, AC2, AC4)", async ({
+  page,
+}) => {
+  const frozenAt = await installFrozenClock(page);
+
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  await cardTapTarget(page, "Aspirin").click();
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/cooldown/);
+
+  // Derived independently from the same frozen instant the app itself
+  // read `cooldownReadyAt` from (`frozenAt` + the 8h interval) — not a
+  // hardcoded clock string — so this stays correct however far `frozenAt`
+  // (real "now" at test-run time, plus installFrozenClock's buffer) happens
+  // to land, and however the runner's local timezone renders it. AC2's "not
+  // locale-formatted" requirement is exercised by hand-building "HH:MM"
+  // here too, rather than via `toLocaleTimeString`.
+  const endDate = new Date(frozenAt + 8 * 60 * 60 * 1000);
+  const hh = String(endDate.getHours()).padStart(2, "0");
+  const mm = String(endDate.getMinutes()).padStart(2, "0");
+  const sameDay = endDate.toDateString() === new Date(frozenAt).toDateString();
+  const expectedTill = sameDay
+    ? `till ${hh}:${mm}`
+    : `till ${endDate.toLocaleDateString("en-US", { weekday: "short" })} ${hh}:${mm}`;
+
+  await expect(item.locator(".cooldown-countdown")).toHaveText(`8h left · ${expectedTill}`);
+});
+
+test("the 'till' segment prefixes the short local weekday name when the cooldown's end instant falls on a different calendar day than now (AC3)", async ({
+  page,
+}) => {
+  await page.clock.install();
+  await page.reload();
+
+  // Pin "now" to 23:50 local time (today), then seed a medication already
+  // 5 minutes into a 20-minute cooldown — its wear-off instant (00:05,
+  // local, the *next* calendar day) is only 15 minutes away, but already a
+  // different local calendar date than "now". A direct localStorage seed
+  // (like the MED-9/MED-10 reload tests above) is used instead of tapping
+  // the card live, so the 20-minute interval doesn't have to survive a
+  // live UI round-trip intact.
+  const now = await page.evaluate(() => Date.now());
+  const base = new Date(now);
+  base.setHours(23, 50, 0, 0);
+  await page.clock.pauseAt(base.getTime() + 2000); // installFrozenClock's own buffer discipline
+  const frozenNow = base.getTime() + 2000;
+
+  const intervalHours = 20 / 60;
+  const lastTakenAt = new Date(frozenNow - 5 * 60 * 1000).toISOString();
+  await page.evaluate(
+    ({ lastTakenAt, intervalHours }) => {
+      window.localStorage.setItem(
+        "medications",
+        JSON.stringify([
+          {
+            id: "cross-day-1",
+            name: "Aspirin",
+            dose: "100mg",
+            intervalHours,
+            cooldownIntervalHours: intervalHours,
+            lastTakenAt,
+          },
+        ])
+      );
+    },
+    { lastTakenAt, intervalHours }
+  );
+  await page.reload();
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/cooldown/);
+
+  const endDate = new Date(new Date(lastTakenAt).getTime() + intervalHours * 60 * 60 * 1000);
+  const hh = String(endDate.getHours()).padStart(2, "0");
+  const mm = String(endDate.getMinutes()).padStart(2, "0");
+  const weekday = endDate.toLocaleDateString("en-US", { weekday: "short" });
+
+  await expect(item.locator(".cooldown-countdown")).toHaveText(
+    `15m left · till ${weekday} ${hh}:${mm}`
+  );
+});
+
+test("a never-taken or corrupted-timestamp medication never renders a 'till' segment (AC8)", async ({
+  page,
+}) => {
+  // Never-taken: the always-visible top strip already reads the literal
+  // "Not yet taken" (MED-38) for this case — confirm MED-42 didn't tack a
+  // "till" suffix onto it.
+  await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
+  const item = page.locator(".medication-item", { hasText: "Aspirin" });
+  await expect(item.locator(".cooldown-countdown")).toHaveText("Not yet taken");
+  await expect(item.locator(".cooldown-countdown")).not.toContainText("till");
+
+  // Corrupted lastTakenAt: seeded directly, mirroring the existing
+  // corrupted-storage test above — `isInCooldown` treats this the same as
+  // never-taken, so the card renders Active with no "till" segment, not a
+  // "till NaN:NaN"-shaped string.
+  await page.evaluate(() => {
+    window.localStorage.setItem(
+      "medications",
+      JSON.stringify([
+        {
+          id: "corrupt-1",
+          name: "Ibuprofen",
+          dose: "200mg",
+          intervalHours: 6,
+          cooldownIntervalHours: 6,
+          lastTakenAt: "not a real timestamp",
+        },
+      ])
+    );
+  });
+  await page.reload();
+  const corruptItem = page.locator(".medication-item", { hasText: "Ibuprofen" });
+  await expect(corruptItem).not.toHaveClass(/cooldown/);
+  await expect(corruptItem.locator(".cooldown-countdown")).toHaveText("Not yet taken");
+  await expect(corruptItem.locator(".cooldown-countdown")).not.toContainText("NaN");
+});
+
+test("the longest possible strip ('{2h 15m 30s left} · till {Weekday} {HH:MM}') does not overflow the card and no wrapped line collides with the icon row, at a 320px viewport (AC7)", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.clock.install();
+  await page.reload();
+  await page.evaluate(() => window.localStorage.clear());
+
+  // Force the literal worst case named in AC7: "2h 15m 30s" remaining, and
+  // a cooldown that wears off on a different calendar day (so the weekday
+  // prefix is also present) — the longest shape this strip can render.
+  const now = await page.evaluate(() => Date.now());
+  const base = new Date(now);
+  base.setHours(23, 40, 0, 0);
+  await page.clock.pauseAt(base.getTime() + 2000);
+  const frozenNow = base.getTime() + 2000;
+
+  await page.evaluate(({ frozenNow }) => {
+    const remainingMs = (2 * 3600 + 15 * 60 + 30) * 1000;
+    const intervalHours = 8;
+    const takenAt = new Date(frozenNow - (intervalHours * 3600 * 1000 - remainingMs)).toISOString();
+    window.localStorage.setItem(
+      "medications",
+      JSON.stringify([
+        {
+          id: "overflow-1",
+          // Long name, mirroring the pre-existing MED-33 AC9 overflow test's
+          // own worst-case name/dose, so this checks the strip's overflow
+          // behavior in the same conditions that test already covers for
+          // name/dose overflow.
+          name: "Amoxicillin Clavulanate Potassium",
+          dose: "875mg/125mg",
+          intervalHours,
+          cooldownIntervalHours: intervalHours,
+          lastTakenAt: takenAt,
+        },
+      ])
+    );
+  }, { frozenNow });
+  await page.reload();
+
+  const item = page.locator(".medication-item");
+  await expect(item).toHaveClass(/cooldown/);
+  // Sanity check this really did produce the long, cross-day shape before
+  // asserting anything about its layout.
+  await expect(item.locator(".cooldown-countdown")).toHaveText(/^2h 15m \d\ds left · till [A-Za-z]{3} \d{2}:\d{2}$/);
+
+  const noHorizontalOverflow = await item.evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
+  expect(noHorizontalOverflow).toBe(true);
+
+  // AC7's "wrap into the icon row" failure mode is a *visual collision*
+  // between the (possibly multi-line, once this text is this long) strip
+  // and `.header-actions` — not merely that the text wraps at all. Checking
+  // the whole paragraph's own bounding box against `.header-actions` would
+  // be too strict (a tall wrapped paragraph's overall box always overlaps a
+  // short absolutely-positioned sibling that starts at the same top), so
+  // this checks each individual wrapped *line's* own rect instead, via
+  // Range.getClientRects().
+  const headerBox = await item.locator(".header-actions").boundingBox();
+  const lineRects = await item.locator(".cooldown-countdown").evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return Array.from(range.getClientRects()).map((r) => ({
+      x: r.x,
+      y: r.y,
+      width: r.width,
+      height: r.height,
+    }));
+  });
+  function intersects(a, b) {
+    return !(
+      a.x + a.width <= b.x ||
+      b.x + b.width <= a.x ||
+      a.y + a.height <= b.y ||
+      b.y + b.height <= a.y
+    );
+  }
+  const anyLineCollidesWithIcons = lineRects.some((rect) => intersects(rect, headerBox));
+  expect(anyLineCollidesWithIcons).toBe(false);
 });
 
 test("the compact card does not overflow or clip its content at a narrow ~320-375px viewport, in either state (MED-33 AC9 — spot-check vs. MED-28)", async ({

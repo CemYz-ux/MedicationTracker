@@ -18,6 +18,7 @@ import {
   formatDuration,
   formatCountdown,
   formatRemainingLabel,
+  formatCooldownEndLabel,
   formatIntervalLabel,
   formatRelativeTime,
   formatLastTakenLabel,
@@ -981,6 +982,15 @@ describe("formatCountdown", () => {
 });
 
 describe("formatRemainingLabel (MED-33)", () => {
+  // MED-42: these three pre-existing tests assert against
+  // `formatCooldownEndLabel(med, now)`'s own (separately, exhaustively
+  // tested below) output for the appended "· till {time}" suffix, rather
+  // than a hardcoded "till HH:MM" string — the wall-clock time a fixed
+  // UTC instant like `takenAt` below renders as depends on the machine's
+  // local timezone, which a hardcoded string can't account for. Pinning
+  // the "{remaining} left" *prefix* as an exact literal (these tests'
+  // original purpose, pre-MED-42) still fully guards that portion of the
+  // format.
   it('formats as "{remaining} left", with seconds, using the same remaining-time math as formatCountdown', () => {
     const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
     const med = {
@@ -992,7 +1002,9 @@ describe("formatRemainingLabel (MED-33)", () => {
       lastTakenAt: new Date(takenAt).toISOString(),
     };
     const now = takenAt + (1 * 3600 + 47 * 60 + 15) * 1000; // 3h12m45s left
-    expect(formatRemainingLabel(med, now)).toBe("3h 12m 45s left");
+    expect(formatRemainingLabel(med, now)).toBe(
+      `3h 12m 45s left · ${formatCooldownEndLabel(med, now)}`
+    );
   });
 
   it("never includes the total-interval segment formatCountdown's longer wording uses", () => {
@@ -1006,7 +1018,9 @@ describe("formatRemainingLabel (MED-33)", () => {
       lastTakenAt: new Date(takenAt).toISOString(),
     };
     const now = takenAt + (1 * 3600 - 45) * 1000; // 45s left of a 1h cooldown
-    expect(formatRemainingLabel(med, now)).toBe("45s left");
+    expect(formatRemainingLabel(med, now)).toBe(
+      `45s left · ${formatCooldownEndLabel(med, now)}`
+    );
   });
 
   it("returns null when the medication is not in cooldown, mirroring formatCountdown's contract", () => {
@@ -1018,6 +1032,120 @@ describe("formatRemainingLabel (MED-33)", () => {
       lastTakenAt: null,
     };
     expect(formatRemainingLabel(med, Date.now())).toBeNull();
+  });
+
+  // MED-42 AC1/AC4: an explicit, fully-literal check (unlike the two tests
+  // above) that the two segments are joined by " · " and derived from
+  // the exact same `cooldownReadyAt` instant — built with the local `Date`
+  // constructor (not a UTC ISO string) specifically so the expected local
+  // HH:MM is known ahead of time and the test stays meaningful regardless
+  // of which timezone it runs in.
+  it('joins the remaining and end-time segments with " · " (AC1)', () => {
+    const lastTakenAt = new Date(2026, 6, 9, 12, 0, 0); // local noon
+    const med = {
+      id: "1",
+      name: "Aspirin",
+      dose: "100mg",
+      intervalHours: 2.5,
+      cooldownIntervalHours: 2.5,
+      lastTakenAt: lastTakenAt.toISOString(),
+    };
+    // Cooldown ends at local 14:30, same calendar day — asked 1 minute
+    // before end, i.e. "1m left".
+    const now = new Date(2026, 6, 9, 14, 29, 0).getTime();
+    expect(formatRemainingLabel(med, now)).toBe("1m left · till 14:30");
+  });
+});
+
+describe("formatCooldownEndLabel (MED-42)", () => {
+  // Every case below builds `lastTakenAt`/`now` with the local `Date`
+  // constructor (year, month, day, hour, minute...), not a UTC ISO string —
+  // that's what lets each test assert an exact, known local HH:MM
+  // regardless of which timezone the test runner's machine is set to
+  // (rather than, say, computing the "expected" string from `now` inside
+  // the test too, which would just duplicate this function's own logic and
+  // never actually catch a bug in it).
+
+  it('formats the end time as a zero-padded 24-hour "HH:MM" with no seconds, no weekday prefix, when it falls on the same calendar day as `now` (AC1, AC2)', () => {
+    const lastTakenAt = new Date(2026, 6, 9, 12, 0, 0); // local noon
+    const med = {
+      id: "1",
+      intervalHours: 2.5,
+      cooldownIntervalHours: 2.5, // ready at local 14:30, same day
+      lastTakenAt: lastTakenAt.toISOString(),
+    };
+    const now = new Date(2026, 6, 9, 13, 0, 0).getTime(); // still mid-cooldown
+    expect(formatCooldownEndLabel(med, now)).toBe("till 14:30");
+  });
+
+  it("zero-pads a single-digit hour and a single-digit minute (AC2)", () => {
+    const lastTakenAt = new Date(2026, 6, 9, 8, 0, 0); // local 08:00
+    const med = {
+      id: "1",
+      intervalHours: 1 + 5 / 60,
+      cooldownIntervalHours: 1 + 5 / 60, // ready at local 09:05
+      lastTakenAt: lastTakenAt.toISOString(),
+    };
+    const now = new Date(2026, 6, 9, 8, 30, 0).getTime();
+    expect(formatCooldownEndLabel(med, now)).toBe("till 09:05");
+  });
+
+  it('zero-pads a midnight hour to "00" with no weekday prefix, when `now` is also already past local midnight on that same calendar date (AC2)', () => {
+    // lastTakenAt is the evening *before* — only `cooldownReadyAt` (not
+    // lastTakenAt) is compared against `now`'s calendar date, so this
+    // doesn't trip the cross-day/weekday-prefix branch (AC3).
+    const lastTakenAt = new Date(2026, 6, 9, 23, 45, 0);
+    const med = {
+      id: "1",
+      intervalHours: 0.5,
+      cooldownIntervalHours: 0.5, // ready at local 00:15 on July 10th
+      lastTakenAt: lastTakenAt.toISOString(),
+    };
+    const now = new Date(2026, 6, 10, 0, 10, 0).getTime(); // also July 10th
+    expect(formatCooldownEndLabel(med, now)).toBe("till 00:15");
+  });
+
+  it("prefixes the short weekday name when the end instant falls on a different calendar day than now — even just minutes away, not '>24h away' (AC3, midnight boundary)", () => {
+    // 2026-07-12 is a Sunday locally; 2026-07-13 is the following Monday.
+    const lastTakenAt = new Date(2026, 6, 12, 23, 52, 0);
+    const med = {
+      id: "1",
+      intervalHours: 1 / 6, // 10 minutes
+      cooldownIntervalHours: 1 / 6, // ready at local 23:52 + 10m = Monday 00:02
+      lastTakenAt: lastTakenAt.toISOString(),
+    };
+    // now is 4 minutes before the Monday-00:02 wear-off instant, but is
+    // itself still Sunday 23:58 — the two instants are barely minutes
+    // apart in elapsed time, yet already on different calendar dates.
+    const now = new Date(2026, 6, 12, 23, 58, 0).getTime();
+    expect(formatCooldownEndLabel(med, now)).toBe("till Mon 00:02");
+  });
+
+  it("returns null (AC8) for a medication that has never been taken", () => {
+    const med = { id: "1", intervalHours: 4, lastTakenAt: null };
+    expect(formatCooldownEndLabel(med, Date.now())).toBeNull();
+  });
+
+  it("returns null (AC8), not a 'till NaN:NaN'-shaped string, for a corrupted/unparseable lastTakenAt", () => {
+    const med = {
+      id: "1",
+      intervalHours: 4,
+      cooldownIntervalHours: 4,
+      lastTakenAt: "not a real timestamp",
+    };
+    expect(formatCooldownEndLabel(med, Date.now())).toBeNull();
+  });
+
+  it("returns null once the cooldown has already elapsed, mirroring formatRemainingLabel's own not-in-cooldown contract", () => {
+    const lastTakenAt = new Date(2026, 6, 9, 12, 0, 0);
+    const med = {
+      id: "1",
+      intervalHours: 1,
+      cooldownIntervalHours: 1,
+      lastTakenAt: lastTakenAt.toISOString(),
+    };
+    const now = new Date(2026, 6, 9, 13, 0, 1).getTime(); // 1s past wear-off
+    expect(formatCooldownEndLabel(med, now)).toBeNull();
   });
 });
 

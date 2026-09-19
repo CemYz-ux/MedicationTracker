@@ -544,6 +544,24 @@ button:hover {
    something here now, so neither `.is-hidden` nor `.last-taken` is needed
    any more; color alone (see the two rules below) now signals which state
    produced the text. */
+/* MED-42 (AC7): appending the "· till {time}" suffix makes this text
+   noticeably longer — long enough that, at a 320px viewport, even the
+   pre-existing "{remaining} left" wording alone no longer fits the ~62px
+   this element's `padding-right` leaves free next to `.header-actions`.
+   No layout change was made here, deliberately: `white-space: nowrap`
+   would force the text past that reserved zone and genuinely collide with
+   the icon row (verified — see the AC7 e2e test), which is strictly worse
+   than what already happens today by leaving wrapping (the browser's
+   default) enabled. Because `.header-actions` is only as tall as one line
+   (`min-height` above matches its 44px), a wrapped second/third/fourth line
+   simply continues below it in normal flow — confirmed via a per-line
+   `getClientRects()` check, not just the element's own bounding box, that
+   no wrapped line ever visually intersects `.header-actions`, even for the
+   longest possible string ("2h 15m 30s left · till Sun 10:00"). The
+   trade-off is a taller card for that rare worst case, which this app has
+   no invariant against (unlike the fixed-height parity `.medication-item`
+   already guarantees between Active and a *normally-wrapping* Cooldown
+   card). */
 .cooldown-countdown {
   display: flex;
   align-items: center;
