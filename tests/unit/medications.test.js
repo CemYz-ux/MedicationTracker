@@ -982,15 +982,6 @@ describe("formatCountdown", () => {
 });
 
 describe("formatRemainingLabel (MED-33)", () => {
-  // MED-42: these three pre-existing tests assert against
-  // `formatCooldownEndLabel(med, now)`'s own (separately, exhaustively
-  // tested below) output for the appended "· till {time}" suffix, rather
-  // than a hardcoded "till HH:MM" string — the wall-clock time a fixed
-  // UTC instant like `takenAt` below renders as depends on the machine's
-  // local timezone, which a hardcoded string can't account for. Pinning
-  // the "{remaining} left" *prefix* as an exact literal (these tests'
-  // original purpose, pre-MED-42) still fully guards that portion of the
-  // format.
   it('formats as "{remaining} left", with seconds, using the same remaining-time math as formatCountdown', () => {
     const takenAt = new Date("2026-07-09T00:00:00.000Z").getTime();
     const med = {
@@ -1002,9 +993,7 @@ describe("formatRemainingLabel (MED-33)", () => {
       lastTakenAt: new Date(takenAt).toISOString(),
     };
     const now = takenAt + (1 * 3600 + 47 * 60 + 15) * 1000; // 3h12m45s left
-    expect(formatRemainingLabel(med, now)).toBe(
-      `3h 12m 45s left · ${formatCooldownEndLabel(med, now)}`
-    );
+    expect(formatRemainingLabel(med, now)).toBe("3h 12m 45s left");
   });
 
   it("never includes the total-interval segment formatCountdown's longer wording uses", () => {
@@ -1018,9 +1007,7 @@ describe("formatRemainingLabel (MED-33)", () => {
       lastTakenAt: new Date(takenAt).toISOString(),
     };
     const now = takenAt + (1 * 3600 - 45) * 1000; // 45s left of a 1h cooldown
-    expect(formatRemainingLabel(med, now)).toBe(
-      `45s left · ${formatCooldownEndLabel(med, now)}`
-    );
+    expect(formatRemainingLabel(med, now)).toBe("45s left");
   });
 
   it("returns null when the medication is not in cooldown, mirroring formatCountdown's contract", () => {
@@ -1034,13 +1021,18 @@ describe("formatRemainingLabel (MED-33)", () => {
     expect(formatRemainingLabel(med, Date.now())).toBeNull();
   });
 
-  // MED-42 AC1/AC4: an explicit, fully-literal check (unlike the two tests
-  // above) that the two segments are joined by " · " and derived from
-  // the exact same `cooldownReadyAt` instant — built with the local `Date`
-  // constructor (not a UTC ISO string) specifically so the expected local
-  // HH:MM is known ahead of time and the test stays meaningful regardless
-  // of which timezone it runs in.
-  it('joins the remaining and end-time segments with " · " (AC1)', () => {
+  // MED-42 originally had this function append `formatCooldownEndLabel`'s
+  // "till {time}" suffix itself, joined with " · " — MED-47 (a Cooldown
+  // card's height varying with how long that joined string happened to be,
+  // once it wrapped unpredictably at narrow widths) moved the "till {time}"
+  // segment out of this function entirely, into its own line the DOM layer
+  // (`js/app.js`'s `updateCooldownDisplay`) renders separately. This test,
+  // formerly asserting the join, now guards the opposite: the two segments
+  // are never combined into one string by this function — each is a
+  // standalone, independently-callable value with its own null contract
+  // (both `formatRemainingLabel` and `formatCooldownEndLabel` return `null`
+  // under the exact same not-in-cooldown condition).
+  it('never joins in `formatCooldownEndLabel`\'s "till {time}" segment — the two are now independent (MED-47)', () => {
     const lastTakenAt = new Date(2026, 6, 9, 12, 0, 0); // local noon
     const med = {
       id: "1",
@@ -1053,7 +1045,8 @@ describe("formatRemainingLabel (MED-33)", () => {
     // Cooldown ends at local 14:30, same calendar day — asked 1 minute
     // before end, i.e. "1m left".
     const now = new Date(2026, 6, 9, 14, 29, 0).getTime();
-    expect(formatRemainingLabel(med, now)).toBe("1m left · till 14:30");
+    expect(formatRemainingLabel(med, now)).toBe("1m left");
+    expect(formatCooldownEndLabel(med, now)).toBe("till 14:30");
   });
 });
 

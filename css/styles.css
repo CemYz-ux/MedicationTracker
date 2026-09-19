@@ -517,11 +517,12 @@ button:hover {
   color: var(--ink-soft);
 }
 
-/* Live top-strip text shared by both card states — the "{remaining} left"
-   Cooldown countdown, or (MED-38, corrected per Jira comment 10320) an
-   Active-state "last taken" relative-time reading ("Just now", "12m ago",
-   or "Not yet taken") — never a separate line, so this one slot is always
-   populated and always reserves the same space regardless of state.
+/* Live top-strip text shared by both card states — the Cooldown countdown
+   (MED-47: "{remaining} left" above, "till {time}" below, always two lines)
+   or (MED-38, corrected per Jira comment 10320) a single-line Active-state
+   "last taken" relative-time reading ("Just now", "12m ago", or "Not yet
+   taken") — this one slot is always populated and always reserves at least
+   the same minimum space regardless of state.
    Supplementary to the card's `--progress` fill during Cooldown, never a
    substitute for it.
    MED-33: relocated from the card's bottom-right corner (MED-18's original
@@ -532,10 +533,7 @@ button:hover {
    to reserve its own space directly. `min-height` matches `.icon-btn`'s
    44px touch target (MED-19) so `.header-actions`, absolutely positioned on
    top of this same row, never overlaps the name/dose/stat row that
-   follows, regardless of whether this text is one line, wrapped, or empty.
-   `padding-right` reserves room so the text can never visually run
-   underneath `.header-actions`: three 44px icon buttons + two 0.5rem gaps
-   is 9.25rem, rounded up for a small safety margin.
+   follows.
    MED-38 (original shipped version) briefly gave this element an
    `.is-hidden` (`visibility: hidden`) modifier to hide the Cooldown
    countdown on Active cards, alongside a separate always-in-DOM
@@ -543,35 +541,83 @@ button:hover {
    "last taken" text into *this* slot instead — both states always show
    something here now, so neither `.is-hidden` nor `.last-taken` is needed
    any more; color alone (see the two rules below) now signals which state
-   produced the text. */
-/* MED-42 (AC7): appending the "· till {time}" suffix makes this text
-   noticeably longer — long enough that, at a 320px viewport, even the
-   pre-existing "{remaining} left" wording alone no longer fits the ~62px
-   this element's `padding-right` leaves free next to `.header-actions`.
-   No layout change was made here, deliberately: `white-space: nowrap`
-   would force the text past that reserved zone and genuinely collide with
-   the icon row (verified — see the AC7 e2e test), which is strictly worse
-   than what already happens today by leaving wrapping (the browser's
-   default) enabled. Because `.header-actions` is only as tall as one line
-   (`min-height` above matches its 44px), a wrapped second/third/fourth line
-   simply continues below it in normal flow — confirmed via a per-line
-   `getClientRects()` check, not just the element's own bounding box, that
-   no wrapped line ever visually intersects `.header-actions`, even for the
-   longest possible string ("2h 15m 30s left · till Sun 10:00"). The
-   trade-off is a taller card for that rare worst case, which this app has
-   no invariant against (unlike the fixed-height parity `.medication-item`
-   already guarantees between Active and a *normally-wrapping* Cooldown
-   card). */
+   produced the text.
+   MED-47: restructured into a fixed-shape two-line flex column (its two
+   children, `.cooldown-countdown-primary`/`.cooldown-countdown-till`, are
+   styled below) — supersedes MED-42's approach of appending "· till {time}"
+   to one string and letting it wrap at narrow widths, which was an
+   explicitly accepted trade-off at the time but left a Cooldown card's
+   height dependent on how long its particular text happened to be. This is
+   unconditional (AC1, AC2): every Cooldown card gets the same two-line
+   shape at every viewport width, not just as a narrow-viewport fallback.
+   `min-height` (below) is still what keeps this element — and so the whole
+   card — the pre-existing MED-18/33 "Active and Cooldown render at
+   identical height" invariant depends on: Active's one populated line and
+   Cooldown's two (each line's own fixed `line-height`, see below) both sit
+   comfortably under this 2.75rem floor, so the container renders at exactly
+   that floor either way rather than growing with an empty second line vs. a
+   populated one — Cooldown never becomes permanently taller than Active
+   just because it always has a second line in the DOM (an empty
+   `.cooldown-countdown-till`, no text content, contributes 0 height on its
+   own, verified empirically; it's `min-height` doing the parity work here,
+   not the empty line). */
 .cooldown-countdown {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.15rem;
   min-height: 2.75rem;
   margin: 0;
-  padding-right: 9.5rem;
   font-family: var(--font-sans);
   font-size: 0.85rem;
   font-weight: 600;
   text-align: left;
+}
+
+/* Both lines share a fixed `line-height` (rather than the font's default,
+   which some browsers derive from the font metrics and so can differ by a
+   fraction of a pixel between engines) so this element's total height is a
+   deterministic constant — never a function of which line happens to have
+   text, or how long that text is — satisfying AC3 structurally rather than
+   by coincidence. `white-space: nowrap` on both keeps the two-line split
+   itself deterministic too, rather than reflowing based on available width
+   (AC1). */
+.cooldown-countdown-primary,
+.cooldown-countdown-till {
+  display: block;
+  line-height: 1.2rem;
+  white-space: nowrap;
+}
+
+/* The top line only — "{remaining} left" during Cooldown, or the Active
+   "last taken" reading — shares its vertical band with the
+   absolutely-positioned `.header-actions` icon row (see that rule's own
+   comment), so only this line needs to reserve the trailing horizontal room
+   those icons occupy. `.cooldown-countdown-till` is always the *second*
+   line, rendered underneath `.header-actions`' 44px band rather than beside
+   it, so it doesn't need the same reservation and gets the card's full
+   width instead.
+   `padding-right` reserves `.header-actions`' own real footprint — three
+   44px icon buttons + two 0.5rem gaps, 9.25rem — plus a small safety
+   margin, verified against real numbers rather than assumed: measured via
+   Playwright at a 320px viewport (the narrowest supported width) with the
+   longest realistic primary-line text ("2h 15m 30s left"), comparing
+   `.header-actions`' actual `getBoundingClientRect()` against the text's
+   own `Range.getClientRects()` (not this element's box, which includes the
+   padding itself). At the bare 9.25rem figure the rendered gap between text
+   and icons measured exactly 0px — touching, not colliding, but with no
+   margin for subpixel/font-rendering variance across browsers — so this is
+   bumped to 9.5rem for a ~4px cushion at that same worst case. (MED-42's
+   now-superseded comment on this element previously cited "~62px free" next
+   to a 9.5rem `padding-right`, which a code reviewer flagged as impossible
+   to reconcile with `.header-actions`' own 9.25rem footprint — that comment
+   described the pre-MED-47 single-line joined string, a different text
+   shape than what's measured here.) `nowrap` on the line above is safe with
+   this reservation specifically because this line's text is short enough on
+   its own (no more " · till {time}" appended to it) to fit the remaining
+   width even at 320px — confirmed by the AC3/AC4 e2e tests below. */
+.cooldown-countdown-primary {
+  padding-right: 9.5rem;
 }
 
 /* MED-38: green while Active (the same semantic green as this state's own

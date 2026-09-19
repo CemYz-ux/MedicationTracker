@@ -832,13 +832,16 @@ test("a Cooldown card's own countdown text is unaffected by this change (AC4) �
 
   const item = page.locator(".medication-item");
   await expect(item).toHaveClass(/cooldown/);
-  // MED-42 appended a "· till {time}" suffix to this same text — the
-  // "8h left" *wording* this test protects is still there (a prefix of the
-  // full string), just no longer the whole of it. The suffix's exact time
-  // isn't asserted here (no frozen clock in this test) — that's covered by
-  // the dedicated MED-42 tests below.
-  await expect(item.locator(".cooldown-countdown")).toHaveText(
-    /^8h left · till (?:[A-Za-z]{3} )?\d{2}:\d{2}$/
+  // MED-42 appended a "· till {time}" suffix to this same text; MED-47 later
+  // moved that suffix to its own separate line (`.cooldown-countdown-till`)
+  // rather than joining it onto this one — the "8h left" *wording* this
+  // test protects is on its own line now, exactly, not a prefix of a longer
+  // joined string. The till line's exact time isn't asserted here (no
+  // frozen clock in this test) — that's covered by the dedicated MED-42/
+  // MED-47 tests below.
+  await expect(item.locator(".cooldown-countdown-primary")).toHaveText("8h left");
+  await expect(item.locator(".cooldown-countdown-till")).toHaveText(
+    /^till (?:[A-Za-z]{3} )?\d{2}:\d{2}$/
   );
 });
 
@@ -854,7 +857,8 @@ test("the shared slot's text is green while Active and amber while Cooldown, dri
   await expect(countdownText).toHaveCSS("color", "rgb(166, 99, 31)"); // --wait
 });
 
-// --- MED-42: wall-clock "till {time}" suffix on the Cooldown countdown ---
+// --- MED-42: wall-clock "till {time}" suffix on the Cooldown countdown
+// (MED-47: rendered on its own always-second line, not " · "-joined) -------
 
 test("a Cooldown card's strip shows both the remaining-time segment and a 'till' time consistent with the countdown, in 24-hour zero-padded HH:MM (AC1, AC2, AC4)", async ({
   page,
@@ -882,7 +886,9 @@ test("a Cooldown card's strip shows both the remaining-time segment and a 'till'
     ? `till ${hh}:${mm}`
     : `till ${endDate.toLocaleDateString("en-US", { weekday: "short" })} ${hh}:${mm}`;
 
-  await expect(item.locator(".cooldown-countdown")).toHaveText(`8h left · ${expectedTill}`);
+  // MED-47: the two segments render on separate lines, not joined by " · ".
+  await expect(item.locator(".cooldown-countdown-primary")).toHaveText("8h left");
+  await expect(item.locator(".cooldown-countdown-till")).toHaveText(expectedTill);
 });
 
 test("the 'till' segment prefixes the short local weekday name when the cooldown's end instant falls on a different calendar day than now (AC3)", async ({
@@ -934,9 +940,9 @@ test("the 'till' segment prefixes the short local weekday name when the cooldown
   const mm = String(endDate.getMinutes()).padStart(2, "0");
   const weekday = endDate.toLocaleDateString("en-US", { weekday: "short" });
 
-  await expect(item.locator(".cooldown-countdown")).toHaveText(
-    `15m left · till ${weekday} ${hh}:${mm}`
-  );
+  // MED-47: the two segments render on separate lines, not joined by " · ".
+  await expect(item.locator(".cooldown-countdown-primary")).toHaveText("15m left");
+  await expect(item.locator(".cooldown-countdown-till")).toHaveText(`till ${weekday} ${hh}:${mm}`);
 });
 
 test("a never-taken or corrupted-timestamp medication never renders a 'till' segment (AC8)", async ({
@@ -944,11 +950,13 @@ test("a never-taken or corrupted-timestamp medication never renders a 'till' seg
 }) => {
   // Never-taken: the always-visible top strip already reads the literal
   // "Not yet taken" (MED-38) for this case — confirm MED-42 didn't tack a
-  // "till" suffix onto it.
+  // "till" suffix onto it. MED-47: the till line (`.cooldown-countdown-till`)
+  // is a separate, always-present element now — confirm it's simply empty
+  // here, not merely absent from the joined string.
   await addMedicationViaUi(page, { name: "Aspirin", dose: "100mg", interval: "8" });
   const item = page.locator(".medication-item", { hasText: "Aspirin" });
-  await expect(item.locator(".cooldown-countdown")).toHaveText("Not yet taken");
-  await expect(item.locator(".cooldown-countdown")).not.toContainText("till");
+  await expect(item.locator(".cooldown-countdown-primary")).toHaveText("Not yet taken");
+  await expect(item.locator(".cooldown-countdown-till")).toHaveText("");
 
   // Corrupted lastTakenAt: seeded directly, mirroring the existing
   // corrupted-storage test above — `isInCooldown` treats this the same as
@@ -972,11 +980,43 @@ test("a never-taken or corrupted-timestamp medication never renders a 'till' seg
   await page.reload();
   const corruptItem = page.locator(".medication-item", { hasText: "Ibuprofen" });
   await expect(corruptItem).not.toHaveClass(/cooldown/);
-  await expect(corruptItem.locator(".cooldown-countdown")).toHaveText("Not yet taken");
+  await expect(corruptItem.locator(".cooldown-countdown-primary")).toHaveText("Not yet taken");
+  await expect(corruptItem.locator(".cooldown-countdown-till")).toHaveText("");
   await expect(corruptItem.locator(".cooldown-countdown")).not.toContainText("NaN");
 });
 
-test("the longest possible strip ('{2h 15m 30s left} · till {Weekday} {HH:MM}') does not overflow the card and no wrapped line collides with the icon row, at a 320px viewport (AC7)", async ({
+// Builds a medication seeded to sit `remainingMs` into cooldown, wearing off
+// at `frozenNow + remainingMs` (`intervalHours` fixed at 8h so short/long
+// cases below share the same interval, differing only in remaining time and
+// so in rendered text length). Shared by the AC3/AC4 tests below, which all
+// need the identical "worst case" and "short case" text shapes at a
+// controlled instant.
+function seedCooldownMedication({ id, name, dose, frozenNow, remainingMs, intervalHours = 8 }) {
+  const takenAt = new Date(frozenNow - (intervalHours * 3600 * 1000 - remainingMs)).toISOString();
+  return {
+    id,
+    name,
+    dose,
+    intervalHours,
+    cooldownIntervalHours: intervalHours,
+    lastTakenAt: takenAt,
+  };
+}
+
+// The longest realistic shape this two-line strip can render: "2h 15m 30s"
+// remaining (three duration components, all two digits), and a cooldown
+// wearing off on a different calendar day so the weekday prefix is also
+// present on the till line — "2h 15m 30s left" / "till {Weekday} HH:MM".
+const LONGEST_REMAINING_MS = (2 * 3600 + 15 * 60 + 30) * 1000;
+
+// A short, single-component case at the opposite end: same-day end time, no
+// weekday prefix — "8h left" / "till HH:MM". Exactly a full 8h interval
+// (i.e. taken right at `frozenNow`) so `formatDuration`'s minutes/seconds
+// components are both exactly zero and get trimmed, rather than something
+// like "7h 59m 59s left" from being a second or two into the cooldown.
+const SHORT_REMAINING_MS = 8 * 3600 * 1000;
+
+test("no wrapped/rendered line of the countdown strip collides with the icon row, at a 320px viewport, for the longest realistic text (AC4, carries forward MED-42's AC7)", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 800 });
@@ -984,66 +1024,59 @@ test("the longest possible strip ('{2h 15m 30s left} · till {Weekday} {HH:MM}')
   await page.reload();
   await page.evaluate(() => window.localStorage.clear());
 
-  // Force the literal worst case named in AC7: "2h 15m 30s" remaining, and
-  // a cooldown that wears off on a different calendar day (so the weekday
-  // prefix is also present) — the longest shape this strip can render.
+  // Wearing off just after 23:40 + ~2h15m puts the end instant on the
+  // following calendar day, forcing the weekday-prefixed till line.
   const now = await page.evaluate(() => Date.now());
   const base = new Date(now);
   base.setHours(23, 40, 0, 0);
   await page.clock.pauseAt(base.getTime() + 2000);
   const frozenNow = base.getTime() + 2000;
 
-  await page.evaluate(({ frozenNow }) => {
-    const remainingMs = (2 * 3600 + 15 * 60 + 30) * 1000;
-    const intervalHours = 8;
-    const takenAt = new Date(frozenNow - (intervalHours * 3600 * 1000 - remainingMs)).toISOString();
-    window.localStorage.setItem(
-      "medications",
-      JSON.stringify([
-        {
-          id: "overflow-1",
-          // Long name, mirroring the pre-existing MED-33 AC9 overflow test's
-          // own worst-case name/dose, so this checks the strip's overflow
-          // behavior in the same conditions that test already covers for
-          // name/dose overflow.
-          name: "Amoxicillin Clavulanate Potassium",
-          dose: "875mg/125mg",
-          intervalHours,
-          cooldownIntervalHours: intervalHours,
-          lastTakenAt: takenAt,
-        },
-      ])
-    );
-  }, { frozenNow });
+  const medication = seedCooldownMedication({
+    id: "overflow-1",
+    // Long name, mirroring the pre-existing MED-33 AC9 overflow test's own
+    // worst-case name/dose, so this checks the strip's layout in the same
+    // conditions that test already covers for name/dose overflow.
+    name: "Amoxicillin Clavulanate Potassium",
+    dose: "875mg/125mg",
+    frozenNow,
+    remainingMs: LONGEST_REMAINING_MS,
+  });
+  await page.evaluate(
+    (medication) => window.localStorage.setItem("medications", JSON.stringify([medication])),
+    medication
+  );
   await page.reload();
 
   const item = page.locator(".medication-item");
   await expect(item).toHaveClass(/cooldown/);
-  // Sanity check this really did produce the long, cross-day shape before
-  // asserting anything about its layout.
-  await expect(item.locator(".cooldown-countdown")).toHaveText(/^2h 15m \d\ds left · till [A-Za-z]{3} \d{2}:\d{2}$/);
+  // Sanity check this really did produce the long, cross-day shape on two
+  // separate lines (MED-47 — not joined by " · ") before asserting anything
+  // about their layout.
+  await expect(item.locator(".cooldown-countdown-primary")).toHaveText(/^2h 15m \d\ds left$/);
+  await expect(item.locator(".cooldown-countdown-till")).toHaveText(
+    /^till [A-Za-z]{3} \d{2}:\d{2}$/
+  );
 
   const noHorizontalOverflow = await item.evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
   expect(noHorizontalOverflow).toBe(true);
 
-  // AC7's "wrap into the icon row" failure mode is a *visual collision*
-  // between the (possibly multi-line, once this text is this long) strip
-  // and `.header-actions` — not merely that the text wraps at all. Checking
-  // the whole paragraph's own bounding box against `.header-actions` would
-  // be too strict (a tall wrapped paragraph's overall box always overlaps a
-  // short absolutely-positioned sibling that starts at the same top), so
-  // this checks each individual wrapped *line's* own rect instead, via
-  // Range.getClientRects().
+  // A visual collision check between the countdown strip's *rendered text*
+  // (not its box — `.cooldown-countdown-primary`'s own box deliberately
+  // extends under `.header-actions` via its reserved `padding-right`; only
+  // the glyphs themselves must not) and `.header-actions`, via each line's
+  // own `Range.getClientRects()` rather than either element's bounding box.
   const headerBox = await item.locator(".header-actions").boundingBox();
   const lineRects = await item.locator(".cooldown-countdown").evaluate((el) => {
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    return Array.from(range.getClientRects()).map((r) => ({
-      x: r.x,
-      y: r.y,
-      width: r.width,
-      height: r.height,
-    }));
+    const rects = [];
+    for (const child of el.children) {
+      const range = document.createRange();
+      range.selectNodeContents(child);
+      for (const r of range.getClientRects()) {
+        rects.push({ x: r.x, y: r.y, width: r.width, height: r.height });
+      }
+    }
+    return rects;
   });
   function intersects(a, b) {
     return !(
@@ -1056,6 +1089,76 @@ test("the longest possible strip ('{2h 15m 30s left} · till {Weekday} {HH:MM}')
   const anyLineCollidesWithIcons = lineRects.some((rect) => intersects(rect, headerBox));
   expect(anyLineCollidesWithIcons).toBe(false);
 });
+
+// MED-47 AC3: a Cooldown card's total height must be the same regardless of
+// how long its particular countdown/till text happens to be — checked at
+// both a narrow (320px) and a wide desktop (1280px) viewport, since AC2
+// requires the two-line layout to be unconditional, not a narrow-viewport
+// fallback that a wide viewport might render differently.
+for (const width of [320, 1280]) {
+  test(`a Cooldown card's height doesn't vary with its countdown/till text length, at a ${width}px viewport (AC2, AC3)`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    // `installFrozenClock`'s own forward-only-from-real-"now" discipline
+    // (see its comment above) rather than an absolute wall-clock hour like
+    // the AC4 test above deliberately uses — that test needs a specific
+    // hour to force the cross-day/weekday case; this one doesn't care which
+    // calendar day either card's wear-off lands on, and pinning to an
+    // arbitrary hour risks `page.clock.pauseAt` rejecting a target already
+    // in the past relative to whatever real time the suite happens to run
+    // at.
+    const frozenNow = await installFrozenClock(page);
+
+    const medications = [
+      seedCooldownMedication({
+        id: "short-1",
+        name: "Aspirin",
+        dose: "100mg",
+        frozenNow,
+        remainingMs: SHORT_REMAINING_MS,
+      }),
+      seedCooldownMedication({
+        id: "long-1",
+        name: "Ibuprofen",
+        dose: "200mg",
+        frozenNow,
+        remainingMs: LONGEST_REMAINING_MS,
+      }),
+    ];
+    await page.evaluate(
+      (medications) => window.localStorage.setItem("medications", JSON.stringify(medications)),
+      medications
+    );
+    await page.reload();
+
+    const shortItem = page.locator(".medication-item", { hasText: "Aspirin" });
+    const longItem = page.locator(".medication-item", { hasText: "Ibuprofen" });
+    await expect(shortItem).toHaveClass(/cooldown/);
+    await expect(longItem).toHaveClass(/cooldown/);
+
+    // Confirm the two cards really do render meaningfully different-length
+    // text before asserting their heights match regardless — the key
+    // difference being the primary line ("8h left" vs "2h 15m 30s left"),
+    // the same one that actually wrapped pre-MED-47. The till line's exact
+    // shape (weekday-prefixed or not) depends on whatever real calendar day
+    // this suite happens to run on relative to `frozenNow`'s forward
+    // buffer — not pinned to a specific one here, unlike the dedicated AC4/
+    // cross-day tests above, which need a specific hour to force it.
+    await expect(shortItem.locator(".cooldown-countdown-primary")).toHaveText("8h left");
+    await expect(shortItem.locator(".cooldown-countdown-till")).toHaveText(
+      /^till (?:[A-Za-z]{3} )?\d{2}:\d{2}$/
+    );
+    await expect(longItem.locator(".cooldown-countdown-primary")).toHaveText(/^2h 15m \d\ds left$/);
+    await expect(longItem.locator(".cooldown-countdown-till")).toHaveText(
+      /^till (?:[A-Za-z]{3} )?\d{2}:\d{2}$/
+    );
+
+    const shortHeight = await shortItem.evaluate((el) => el.getBoundingClientRect().height);
+    const longHeight = await longItem.evaluate((el) => el.getBoundingClientRect().height);
+    expect(shortHeight).toBe(longHeight);
+  });
+}
 
 test("the compact card does not overflow or clip its content at a narrow ~320-375px viewport, in either state (MED-33 AC9 — spot-check vs. MED-28)", async ({
   page,
