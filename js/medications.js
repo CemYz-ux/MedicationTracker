@@ -422,13 +422,23 @@ export function formatCountdown(medication, now = Date.now()) {
 }
 
 /**
- * The "till {time}" suffix MED-42 appends to `formatRemainingLabel`'s
- * countdown text, e.g. "till 14:30" — or, when the cooldown's end instant
- * falls on a different *local calendar date* than `now`, the short weekday
- * name prefixed: "till Sun 10:00" (AC3). "Different calendar date" is a
- * date comparison (year/month/day), not an "is it >24h away" one: a
- * cooldown ending at 23:50 tonight, checked at 23:30, is only 20 minutes
- * away but already a different calendar day once midnight passes.
+ * The "till {time}" line rendered directly underneath `formatRemainingLabel`'s
+ * "{remaining} left" text on a Cooldown card, e.g. "till 14:30" — or, when
+ * the cooldown's end instant falls on a different *local calendar date* than
+ * `now`, the short weekday name prefixed: "till Sun 10:00" (AC3). "Different
+ * calendar date" is a date comparison (year/month/day), not an "is it >24h
+ * away" one: a cooldown ending at 23:50 tonight, checked at 23:30, is only
+ * 20 minutes away but already a different calendar day once midnight
+ * passes.
+ *
+ * MED-42 originally had `formatRemainingLabel` append this as a " · "-joined
+ * suffix of its own return value. MED-47 (card height varying with that
+ * joined string's length, once it wrapped unpredictably at narrow widths)
+ * split the two apart: this function's output and contract are otherwise
+ * unchanged — it still returns just the "till {time}" segment on its own —
+ * only the *caller* changed, from `formatRemainingLabel` itself to
+ * `js/app.js`'s `updateCooldownDisplay`, which now places this segment into
+ * its own always-second line rather than concatenating it onto the first.
  *
  * {time} is always 24-hour and zero-padded to two digits for both hour and
  * minute, with no seconds ("09:05", "00:15") — and deliberately *not*
@@ -487,19 +497,25 @@ export function formatCooldownEndLabel(medication, now = Date.now()) {
  * Returns `null` when the medication is not currently in cooldown, mirroring
  * `formatCountdown`'s own contract.
  *
- * MED-42 appends `formatCooldownEndLabel`'s "till {time}" suffix, separated
- * by " · " (AC1) — e.g. "2h 15m 30s left · till 14:30". That call is
- * guaranteed non-null here: it returns null under the exact same
- * not-in-cooldown condition this function has already ruled out via its own
- * `isInCooldown` guard above, so there's no need for a fallback branch.
+ * MED-42 originally had this function append `formatCooldownEndLabel`'s
+ * "till {time}" suffix itself, joined with " · " (e.g. "2h 15m 30s left ·
+ * till 14:30"), all as one string set as `.cooldown-countdown`'s
+ * `textContent`. MED-47 (that joined string wrapping unpredictably at
+ * narrow widths, so a Cooldown card's height varied with how long a given
+ * medication's text happened to be) moved the "till {time}" segment out of
+ * this function entirely: `js/app.js`'s `updateCooldownDisplay` now calls
+ * `formatCooldownEndLabel` separately and places it in its own line below
+ * this one, always, regardless of viewport width — not conditionally, and
+ * not by letting either segment wrap. This function's own contract is
+ * otherwise unchanged: still just the "{remaining} left" text, still the
+ * same remaining-time math as `formatCountdown`'s own remaining segment.
  */
 export function formatRemainingLabel(medication, now = Date.now()) {
   if (!isInCooldown(medication, now)) return null;
   const remaining = formatDuration(getCooldownRemainingMs(medication, now), {
     includeSeconds: true,
   });
-  const endLabel = formatCooldownEndLabel(medication, now);
-  return `${remaining} left · ${endLabel}`;
+  return `${remaining} left`;
 }
 
 /**
